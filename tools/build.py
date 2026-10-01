@@ -80,6 +80,9 @@ def main():
     if args.command == "deps":
         return
     env = dict(os.environ, WKAL_BOARD=args.target)
+    # espressif/idf container images export IDF_TARGET=esp32; idf.py rejects
+    # a differing command-line target, so pin the environment too.
+    env["IDF_TARGET"] = "esp32s3"
     build = ROOT / "build" / args.target
     build.mkdir(parents=True, exist_ok=True)
     env["WKAL_BUILD_DIR"] = str(build)
