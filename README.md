@@ -1,3 +1,5 @@
+**English** · [简体中文](README.zh-CN.md)
+
 # PS5 WKAL ESP32-S3 Host
 
 An ESP32-S3 firmware that merges the **PC host** flow of
@@ -37,6 +39,71 @@ sdkconfig and build directory:
 
 `python3 tools/build.py targets` prints the live list from
 `targets/boards.json`.
+
+## The USB drive: layout & payload autoload
+
+The exposed volume is a plain FAT drive — open it from a PC and you get:
+
+```
+frontend.zip            the web frontend the AP serves (see below)
+ps5_autoloader/         payload drop-in dir read by the PS5 side
+  README.txt            short on-drive instructions
+  autoload.txt          (optional) load list, see format below
+  etaHEN.elf            payload ELFs you place here
+  kstuff.elf
+  ...
+```
+
+After the exploit chain jailbreaks the console it loads the **unified
+autoloader** (bundled in the frontend as `payloads/payload.elf`). The
+autoloader waits for the ELF loader, then looks for an `autoload.txt`
+config, highest priority first:
+
+1. `ps5_autoloader_<app>/autoload.txt` on the USB drive — `<app>` is
+   `bdjb` for the Blu-ray-player jailbreak or the entry app's Title ID
+   (e.g. `PPSA01650` for YouTube)
+2. `ps5_autoloader_<app>/autoload.txt` in the PS5's internal `/data`
+3. `ps5_autoloader/autoload.txt` on the USB drive — **the usual case on
+   this device**
+4. `ps5_autoloader/autoload.txt` in internal `/data`
+
+If a config is found, every payload listed in it is launched in order.
+If none is found, the autoloader starts its bundled **Payload Manager**
+so payloads can be picked on the console instead.
+
+### `autoload.txt` format
+
+```
+# a line starting with '#' is a comment
+etaHEN.elf              # resolved relative to this file's directory
+!1500                   # sleep 1500 ms before the next line
+kstuff.elf
+@sync                   # optional, see below
+```
+
+- one entry per line; blank lines and `#` comments are ignored
+- file names are relative to the directory containing `autoload.txt`;
+  absolute paths (starting with `/`) are used as-is
+- `!<ms>` sleeps before the next line — timing-sensitive payloads
+  (e.g. kstuff right after etaHEN) usually want a pause
+- `@sync` (best placed last): once every payload has loaded without a
+  single error, the whole active directory is copied to the PS5's
+  internal `/data`, verified byte-by-byte, and removed from the drive —
+  later boots then run from the console's own storage. Note that on this
+  device `@sync` writes to the emulated USB volume **from the PS5
+  side**, which is not part of the supported update flow; treat it as
+  experimental. The supported flow is: edit the drive from a PC with the
+  device unplugged from the console.
+
+Payload ELFs are not included — drop in the ones you use (etaHEN,
+kstuff, ...) from their own projects. To bake payloads into the storage
+image at flash time instead, use `make storage PAYLOAD_DIR=<dir>` (or
+`build.py --payload-dir <dir>`).
+
+Update flow: unplug from the PS5 → plug into a PC → edit files →
+eject → replug into the PS5. The firmware caches the FAT/zip index until
+the next power cycle, so edits made while it is serving do not take
+effect until a replug.
 
 ## The frontend is built from upstream — never committed
 
