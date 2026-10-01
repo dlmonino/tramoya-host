@@ -1,0 +1,155 @@
+# Build firmware for every supported ESP32-S3 memory configuration.
+#
+# The frontend is never committed: each run packages the frontend built from
+# the latest ps5-webkit-autoloader release tag (or the pinned upstream_tag
+# input), so a dispatch always produces the current upstream frontend.
+#
+# - workflow_dispatch: pick targets / pin the upstream tag; artifacts only.
+# - push tag v*: full matrix + a GitHub release with per-board images.
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma-separated board targets, or "all"'
+        required: false
+        default: 'all'
+      upstream_tag:
+        description: 'Upstream ps5-webkit-autoloader tag (empty = latest release)'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_TAG: ${{ github.event.inputs.upstream_tag }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: targets
+        env:
+          INPUT: ${{ github.event.inputs.targets || 'all' }}
+        run: |
+          ALL="esp32s3-n4r2 esp32s3-n8r2 esp32s3-n8r8 esp32s3-n16r2 esp32s3-n16r8 esp32s3-n32r8"
+          if [ "${INPUT}" = "all" ]; then LIST="${ALL}"; else LIST=$(echo "${INPUT}" | tr ',' ' '); fi
+          for t in ${LIST}; do
+            grep -q "\"${t}\"" targets/boards.json || { echo "unknown target: ${t}"; exit 1; }
+          done
+          echo "matrix=$(python3 -c 'import json,sys; print(json.dumps({"target": sys.argv[1:]}))' ${LIST})" >> "$GITHUB_OUTPUT"
+
+  tests:
+    # Host unit suite (no ESP-IDF): the C tests against a synthetic frontend.
+    # The FAT round-trip part is skipped here and covered by integration.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install host toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential zlib1g-dev
+      - name: Unit tests
+        run: |
+          python3 tools/build.py test
+      - name: Unit tests (ASan/UBSan)
+        run: |
+          python3 tools/build.py test-asan
+
+  integration:
+    # Full suite including the wear-levelled FAT image round-trip inside the
+    # ESP-IDF environment it ships with.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run host tests with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.2
+          command: apt-get update -qq && apt-get install -y -qq zlib1g-dev; python tools/build.py test
+
+  frontend:
+    # One frontend.zip per run, built from the resolved upstream release;
+    # every board below packages exactly this archive.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build frontend.zip from the upstream release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FLAGS=""
+          if [ -n "${UPSTREAM_TAG}" ]; then FLAGS="--tag ${UPSTREAM_TAG}"; fi
+          python3 tools/build_frontend_zip.py --out frontend.zip ${FLAGS}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend
+          path: |
+            frontend.zip
+            frontend.zip-source.json
+          if-no-files-found: error
+
+  build:
+    needs: [prepare, tests, integration, frontend]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend
+          path: .
+      - name: Build ${{ matrix.target }}
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.2
+          command: python tools/build.py package --target ${{ matrix.target }} --frontend frontend.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.target }}
+          path: |
+            build/${{ matrix.target }}/ps5_wkal_host-full.bin
+            build/${{ matrix.target }}/firmware-manifest.json
+            build/${{ matrix.target }}/storage.img
+            build/${{ matrix.target }}/frontend-source.json
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Rename images per board
+        run: |
+          mkdir -p out
+          for dir in dist/firmware-*; do
+            board="${dir#dist/firmware-}"
+            cp "${dir}/ps5_wkal_host-full.bin" "out/ps5-wkal-${GITHUB_REF_NAME}-${board}-full.bin"
+            cp "${dir}/firmware-manifest.json" "out/ps5-wkal-${GITHUB_REF_NAME}-${board}-manifest.json"
+          done
+          cp dist/frontend/frontend.zip out/
+          cp dist/frontend/frontend.zip-source.json out/
+          ls -la out
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes out/*

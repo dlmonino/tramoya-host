@@ -1,0 +1,38 @@
+menu "PS5 WKAL host"
+
+    config WKAL_AP_SSID
+        string "AP SSID"
+        default "PS5 WKAL"
+        help
+            SSID of the access point the PS5 connects to. Open network,
+            no password.
+
+    config WKAL_TARGET_DOMAIN
+        string "DNS target domain"
+        default "manuals.playstation.net"
+        help
+            The domain the PS5 resolves when opening the User's Guide.
+            A queries are answered with the AP's IP; everything else gets
+            NXDOMAIN.
+
+    config WKAL_STORAGE_PARTITION
+        string "Storage partition name"
+        default "storage"
+
+    config WKAL_STORAGE_MOUNT_PATH
+        string "Storage FAT mount path"
+        default "/msc"
+
+    config WKAL_STORAGE_ZIP_NAME
+        string "Frontend zip file name on storage"
+        default "frontend.zip"
+
+    config WKAL_SELECTED_EXPLOIT
+        string "Default exploit for dual-support firmwares"
+        default "relapse"
+        help
+            Served at /selected_exploit; app.js reads it on firmwares that
+            support both poops and relapse (7.00-12.00). Mirrors the PC
+            host's FORCE_EXPLOIT default.
+
+endmenu

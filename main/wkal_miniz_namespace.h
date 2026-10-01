@@ -1,0 +1,22 @@
+#pragma once
+
+/* ESP32-S3's ROM linker script assigns these names to an older miniz ABI.
+ * Give our vendored implementation private names in every translation unit;
+ * otherwise ROM tinfl writes past our differently sized decompressor state. */
+#define mz_adler32 wkal_mz_adler32
+#define mz_crc32 wkal_mz_crc32
+#define mz_free wkal_mz_free
+#define tdefl_compress wkal_tdefl_compress
+#define tdefl_compress_buffer wkal_tdefl_compress_buffer
+#define tdefl_compress_mem_to_heap wkal_tdefl_compress_mem_to_heap
+#define tdefl_compress_mem_to_mem wkal_tdefl_compress_mem_to_mem
+#define tdefl_compress_mem_to_output wkal_tdefl_compress_mem_to_output
+#define tdefl_get_adler32 wkal_tdefl_get_adler32
+#define tdefl_get_prev_return_status wkal_tdefl_get_prev_return_status
+#define tdefl_init wkal_tdefl_init
+#define tdefl_write_image_to_png_file_in_memory wkal_tdefl_write_image_to_png_file_in_memory
+#define tdefl_write_image_to_png_file_in_memory_ex wkal_tdefl_write_image_to_png_file_in_memory_ex
+#define tinfl_decompress wkal_tinfl_decompress
+#define tinfl_decompress_mem_to_callback wkal_tinfl_decompress_mem_to_callback
+#define tinfl_decompress_mem_to_heap wkal_tinfl_decompress_mem_to_heap
+#define tinfl_decompress_mem_to_mem wkal_tinfl_decompress_mem_to_mem

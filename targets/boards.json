@@ -1,0 +1,38 @@
+{
+  "esp32s3-n4r2": {
+    "flash_mb": 4,
+    "psram_mb": 2,
+    "psram_mode": "quad",
+    "partition_table": "targets/partitions_4m.csv"
+  },
+  "esp32s3-n8r2": {
+    "flash_mb": 8,
+    "psram_mb": 2,
+    "psram_mode": "quad",
+    "partition_table": "targets/partitions_8m.csv"
+  },
+  "esp32s3-n16r2": {
+    "flash_mb": 16,
+    "psram_mb": 2,
+    "psram_mode": "quad",
+    "partition_table": "targets/partitions_16m.csv"
+  },
+  "esp32s3-n8r8": {
+    "flash_mb": 8,
+    "psram_mb": 8,
+    "psram_mode": "octal",
+    "partition_table": "targets/partitions_8m.csv"
+  },
+  "esp32s3-n16r8": {
+    "flash_mb": 16,
+    "psram_mb": 8,
+    "psram_mode": "octal",
+    "partition_table": "targets/partitions_16m.csv"
+  },
+  "esp32s3-n32r8": {
+    "flash_mb": 32,
+    "psram_mb": 8,
+    "psram_mode": "octal",
+    "partition_table": "targets/partitions_32m.csv"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "miniz": {
+    "version": "3.0.2",
+    "url": "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip",
+    "sha256": "ada38db0b703a56d3dd6d57bf84a9c5d664921d870d8fea4db153979fb5332c5",
+    "files": {
+      "miniz.c": "0fcdc9888cb3a29ca8f176bac087e5fe6c7258a6ab06b1c271c1e109a11d3740",
+      "miniz.h": "295d1a0041aea09609598c0f1f35c1977ca05ad662acbadcfdaac44c140af37b"
+    }
+  },
+  "frontend_reference": {
+    "repository": "https://github.com/itsPLK/ps5-webkit-autoloader",
+    "tested_commit": "f5e57c492a4a7b5ccd28ecddb43f8c325cf93aa2",
+    "license": "GPL-3.0",
+    "bundled": false
+  }
+}
