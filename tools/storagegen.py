@@ -15,6 +15,7 @@ Usage:
 import argparse
 import os
 import shutil
+from pathlib import Path
 import sys
 import tempfile
 from partition_layout import partition
@@ -44,10 +45,13 @@ def main():
     stage = tempfile.mkdtemp(prefix="wkal_storage_")
     try:
         shutil.copy(args.zip_path, os.path.join(stage, "frontend.zip"))
-        if args.payload_dir:
+        # Payload drop-in dir for the PS5: the external payload dir replaces
+        # the bundled template (readme only) when one is given.
+        payloads = Path(args.payload_dir) if args.payload_dir else             Path(__file__).resolve().parent / "ps5_autoloader"
+        if payloads.is_dir():
             os.makedirs(os.path.join(stage, "ps5_autoloader"), exist_ok=True)
-            for name in os.listdir(args.payload_dir):
-                src = os.path.join(args.payload_dir, name)
+            for name in sorted(os.listdir(payloads)):
+                src = os.path.join(payloads, name)
                 if os.path.isfile(src):
                     shutil.copy(src, os.path.join(stage, "ps5_autoloader", name))
 
