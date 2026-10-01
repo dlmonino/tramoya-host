@@ -92,7 +92,10 @@ def main():
     if not env.get("IDF_PATH"):
         parser.error("Activate ESP-IDF v5.4.2 first (IDF_PATH is unset)")
     idf = [sys.executable, str(Path(env["IDF_PATH"]) / "tools/idf.py"),
-           "-B", str(build), "-D", "WKAL_BOARD=" + args.target]
+           "-B", str(build), "-D", "WKAL_BOARD=" + args.target,
+           # Pin the target: the espressif/idf container exports
+           # IDF_TARGET=esp32, which would override sdkconfig.defaults.
+           "-D", "IDF_TARGET=esp32s3"]
     profile = BOARDS[args.target]
     if args.command == "monitor":
         if not args.port: parser.error("monitor requires --port")
