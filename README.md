@@ -22,6 +22,40 @@ chain loads payloads straight off the drive. Update flow: unplug from PS5 →
 plug into a PC → replace `frontend.zip` → unplug → replug (power cycle
 reloads).
 
+## Idle power and heat
+
+CPU power management now uses **80 MHz when idle / 160 MHz while tasks are
+runnable**, following the USB-safe approach in
+[the remote-buddy power changes](https://github.com/kxn/vibe-remote-buddy-firmware/pull/1).
+APB stays at 80 MHz for USB OTG and PSRAM; automatic light sleep and deep
+sleep are not used. USB storage and the Wi-Fi hotspot remain available.
+See ESP-IDF's [power management documentation](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/api-reference/system/power_management.html).
+
+The five-second heartbeat and repeated flash crash-record reads are removed;
+boot/crash diagnostics run once, and per-request DNS/HTTP logs are debug-level.
+The main task exits after startup. DNS blocks waiting for packets and backs
+off on socket errors; TinyUSB already waits for USB events.
+
+**An always-on Wi-Fi AP still draws radio power even without page requests.**
+ESP32-S3's [Wi-Fi Modem-sleep](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/api-guides/wifi.html#station-sleep)
+works in station-only mode, so enabling `WIFI_PS_MIN_MODEM` does not make
+this hotspot sleep. Fewer application tasks do not guarantee lower idle
+power than a BLE receiver. Further radio savings would require a different
+operating mode, such as explicitly turning off the hotspot after use.
+
+`tools/build.py build/package/flash` also updates the power settings in an
+existing per-board `sdkconfig`, preserving other settings, and validates the
+resolved configuration. Direct `idf.py` builds need a fresh configuration
+or the equivalent manual settings. This is a **firmware update**: replacing
+`frontend.zip` alone cannot enable it. Flash the correct board target without
+`--erase-storage` to preserve USB files; a `*-full.bin` overwrites them.
+
+For a hardware comparison, use the same USB supply, enclosure, ambient
+temperature, and Wi-Fi client state. Wait for temperatures to settle and
+measure idle USB current before/after; then check PS5 reconnection, User's
+Guide HTTPS loading, payload reads, and PC USB writes. Build/host tests do
+not establish a measured temperature or current reduction.
+
 ## Hardware targets
 
 All ESP32-S3 flash/PSRAM combinations are supported — pick the board with

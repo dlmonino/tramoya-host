@@ -53,9 +53,16 @@ static void dns_task(void *arg)
         socklen_t from_len = sizeof(from);
         int n = recvfrom(dns->sock, work->query, sizeof(work->query), 0,
                          (struct sockaddr *)&from, &from_len);
-        if (n < 0) continue;
-        if (wk_dns_parse_query(work->query, (size_t)n, &work->observed) == WK_DNS_PARSE_OK)
-            ESP_LOGI(TAG, "Query %s type=%u, DNS stack remaining=%u",
+        if (n < 0) {
+            /* A persistent socket error must not turn idle DNS into a
+             * runnable busy loop that holds the CPU at its maximum clock. */
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        if (LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG &&
+            esp_log_level_get(TAG) >= ESP_LOG_DEBUG &&
+            wk_dns_parse_query(work->query, (size_t)n, &work->observed) == WK_DNS_PARSE_OK)
+            ESP_LOGD(TAG, "Query %s type=%u, DNS stack remaining=%u",
                      work->observed.name, (unsigned)work->observed.qtype,
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
 

@@ -12,6 +12,7 @@ import zipfile
 
 from diagnostic_frontend import generate
 from fetch_dependencies import fetch
+from power_config import prepare_power_config, validate_power_config
 
 ROOT = Path(__file__).resolve().parents[1]
 BOARDS = json.loads((ROOT / "targets/boards.json").read_text())
@@ -51,6 +52,7 @@ def resolve_frontend(args, build, env):
 
 
 def validate_config(build, board, profile):
+    validate_power_config(build / "sdkconfig")
     config = (build / "sdkconfig").read_text()
     required = [f'CONFIG_ESPTOOLPY_FLASHSIZE="{profile["flash_mb"]}MB"',
                 f'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="{profile["partition_table"]}"',
@@ -87,6 +89,7 @@ def main():
     build.mkdir(parents=True, exist_ok=True)
     env["WKAL_BUILD_DIR"] = str(build)
     if args.command in ("test", "test-asan"):
+        run([sys.executable, "tools/tests/test_power_config.py"], env)
         path = args.frontend.resolve() if args.frontend else generate(ROOT / "build/test/frontend.zip", test=True)
         env["WKAL_TEST_ZIP"] = str(path)
         run(["make", "-C", "tools/tests", "clean"], env)
@@ -109,6 +112,7 @@ def main():
     if args.command == "menuconfig":
         run(idf + ["menuconfig"], env); return
     if args.command != "storage":
+        prepare_power_config(build / "sdkconfig")
         run(idf + ["build"], env)
         validate_config(build, args.target, profile)
         run([sys.executable, "tools/check_miniz_link.py"], env)

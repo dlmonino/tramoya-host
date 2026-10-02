@@ -18,6 +18,34 @@
 用户指南，漏洞链直接从盘上加载 payload。更新流程：从 PS5 上拔下 →
 插到 PC 上改文件 → 拔下 → 重新插回 PS5（重新上电即生效）。
 
+## 待机功耗与发热
+
+参考[遥控器项目的省电修改](https://github.com/kxn/vibe-remote-buddy-firmware/pull/1)，
+CPU 现在使用**空闲 80 MHz、有任务运行时 160 MHz** 的动态调频。
+APB 保持 80 MHz，供 USB OTG 和 PSRAM 使用；不启用整机自动 Light-sleep
+或 Deep-sleep，U 盘和 Wi-Fi 热点持续可用。原理见
+[ESP-IDF 电源管理文档](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/api-reference/system/power_management.html)。
+
+去掉每 5 秒的心跳日志和反复读取闪存崩溃记录：启动/崩溃诊断只运行一次，
+DNS/HTTP 逐请求日志改为调试级别，主任务初始化后退出。DNS 阻塞等待请求，
+socket 出错时延迟重试，避免忙循环；TinyUSB 本身已按 USB 事件阻塞等待。
+
+**热点即使没有网页请求，也需要维持无线收发。** ESP32-S3 的
+[Wi-Fi Modem-sleep](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/api-guides/wifi.html#station-sleep)
+适用于 station-only 模式；调用 `WIFI_PS_MIN_MODEM` 不能让本项目的热点休眠。
+所以应用任务少不代表待机一定比 BLE 遥控器接收器省电。进一步降低无线功耗，
+需要改变使用方式，例如用完后显式关闭热点。
+
+`tools/build.py build/package/flash` 会同步已有板型 `sdkconfig` 的省电配置，
+保留其他设置，并校验最终配置。直接用 `idf.py` 时，需要重新生成配置或手动
+设置相同选项。这是**固件更新**，只替换 `frontend.zip` 不会生效。
+选择正确板型刷写，不加 `--erase-storage` 可保留 U 盘文件；`*-full.bin`
+整包会覆盖这些文件。
+
+实测时保持相同 USB 供电、外壳、环境温度和 Wi-Fi 连接状态，等温度稳定后
+比较更新前后的 USB 待机电流，并复测 PS5 重连、用户指南 HTTPS 页面、payload
+读取和 PC U 盘写入。编译和主机测试不能证明具体降低了多少温度或电流。
+
 ## 硬件目标
 
 支持所有 ESP32-S3 闪存/PSRAM 组合——用 `--target`（或

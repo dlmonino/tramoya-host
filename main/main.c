@@ -26,6 +26,7 @@
 #include "esp_psram.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
+#include "esp_pm.h"
 #include "dns_server.h"
 #include "http_server.h"
 #include "usb_storage.h"
@@ -189,6 +190,18 @@ static void start_servers(void)
 
 void app_main(void)
 {
+    /* Keep the PLL and 80 MHz APB clock available to USB OTG and PSRAM.
+     * FreeRTOS raises the CPU to 160 MHz while tasks are runnable, and
+     * allows 80 MHz when idle, even while the SoftAP holds its APB lock.
+     * XTAL-only DFS / automatic light sleep are unsuitable for this
+     * always-connected USB drive and Wi-Fi access point. */
+    const esp_pm_config_t power = {
+        .min_freq_mhz = 80,
+        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+        .light_sleep_enable = false,
+    };
+    ESP_ERROR_CHECK(esp_pm_configure(&power));
+
     uint32_t flash_size = 0;
     esp_flash_get_size(NULL, &flash_size);
     ESP_LOGI(TAG, "PS5 WKAL host on %s, %u MB flash, %s PSRAM",
@@ -260,18 +273,15 @@ void app_main(void)
     /* The server tasks must see the netif in a started state. */
     vTaskDelay(pdMS_TO_TICKS(500));
     start_servers();
+    ESP_LOGI(TAG, "CPU power management: %d-%d MHz, light sleep disabled",
+             power.min_freq_mhz, power.max_freq_mhz);
 #if CONFIG_TINYUSB_CDC_ENABLED
     ESP_LOGI(TAG, "Boot reset reason: %d", (int)esp_reset_reason());
-    for (;;) {
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
-        log_last_crash();
+    log_last_crash();
 #endif
-        ESP_LOGI(TAG, "Running: reset=%d, heap=%u, main stack remaining=%u",
-                 (int)esp_reset_reason(),
-                 (unsigned)esp_get_free_heap_size(),
-                 (unsigned)uxTaskGetStackHighWaterMark(NULL));
-        vTaskDelay(pdMS_TO_TICKS(5000));
-    }
 #endif
+    /* app_main may return: the USB, DNS and HTTP tasks own their lifetimes.
+     * Do not wake every five seconds to reread flash / write CDC logs. */
 }
 

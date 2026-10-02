@@ -145,9 +145,9 @@ __attribute__((weak)) esp_err_t wk_httpd_handle_get(httpd_req_t *req, web_server
 
 static esp_err_t handle_get(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "GET %s", req->uri);
+    ESP_LOGD(TAG, "GET %s", req->uri);
     esp_err_t result = wk_httpd_handle_get(req, req->user_ctx);
-    ESP_LOGI(TAG, "GET completed: %s", esp_err_to_name(result));
+    ESP_LOGD(TAG, "GET completed: %s", esp_err_to_name(result));
     return result;
 }
 
@@ -231,7 +231,7 @@ esp_err_t wk_httpd_handle_post(httpd_req_t *req)
         if (received <= 0) return ESP_FAIL; /* SDK closes failed sessions. */
         remaining -= (size_t)received;
     }
-    ESP_LOGI(TAG, "POST network test: %u bytes", (unsigned)req->content_len);
+    ESP_LOGD(TAG, "POST network test: %u bytes", (unsigned)req->content_len);
     return send_probe(req, body, length, false);
 }
 
