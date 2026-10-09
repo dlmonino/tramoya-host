@@ -1,300 +1,294 @@
-**English** · [简体中文](README.zh-CN.md)
+**Español** · [English](README.en.md)
 
-# PS5 WKAL ESP32-S3 Host
+# TRAMOYA Host
 
-An ESP32-S3 firmware that merges the **PC host** flow of
+TRAMOYA es un proyecto de servidor Wi-Fi autónomo sobre ESP32-S3, alimentado
+por USB, para servir contenido homebrew a una PS5 sin darle acceso a Internet.
+El objetivo de desarrollo es PS5 con firmware **13.60** y una placa **N16R8**
+(16 MB de flash y 8 MB de PSRAM), con actualización de contenido mediante
+almacenamiento USB MSC. El formato dongle se explorará más adelante.
+
+Este repositorio es un fork de
+[kxn/ps5-wkal-esp32s3](https://github.com/kxn/ps5-wkal-esp32s3), basado en la
+revisión `70aed11faa1a657cd25cc5a52781c2b3764398f5`. Conserva su historial,
+autorías y licencias. El nombre interno de los artefactos sigue siendo
+`ps5_wkal_host`; esta actualización de documentación no cambia el firmware.
+
+## Estado actual — 9 de octubre de 2026
+
+**El diagnóstico físico está superado. La integración y las pruebas en PS5
+siguen pendientes.** Se ha grabado y ejecutado un proyecto de diagnóstico
+independiente, `esp32s3-servidor-diagnostico`, en una placa N16R8. La segunda
+placa se conserva como referencia con `hello_world`.
+
+- Superados: arranque, PSRAM, Wi-Fi WPA2, DHCP, DNS, HTTP/HTTPS, aislamiento
+  de Internet y lectura, escritura y persistencia por USB MSC.
+- Estabilidad: diez minutos, 61 muestras, cero errores y ningún reinicio
+  detectado; memoria interna estable tras el calentamiento.
+- Pendientes: completar la preparación del firmware de este repositorio,
+  integrar el contenido elegido, validar su actualización real mediante MSC
+  y repetir las pruebas sobre la compilación final antes de usar la PS5.
+
+El diagnóstico sirve páginas integradas en la aplicación. Su prueba MSC no
+demuestra todavía la actualización de las páginas servidas desde USB. Tampoco
+acredita compatibilidad funcional con PS5 13.60. Los resultados, límites y
+siguientes pasos están en [Estado y validación](docs/estado-proyecto.md).
+
+El resto de esta guía describe la arquitectura y las herramientas heredadas
+del proyecto base. Sus prestaciones no deben confundirse con las pruebas
+físicas del diagnóstico independiente. La opción `--frontend-source diagnostic`
+de este repositorio genera otra página de prueba; **no reproduce** ese proyecto.
+
+## Arquitectura del proyecto base
+
+La base combina el flujo de servidor para ordenador de
 [itsPLK/ps5-webkit-autoloader](https://github.com/itsPLK/ps5-webkit-autoloader)
-with a **USB drive** — one device, plugged straight into the PS5:
+con un volumen USB en el ESP32-S3:
 
-1. **USB**: the ESP32 enumerates as a mass-storage drive (TinyUSB MSC over a
-   wear-levelled FAT partition). The PS5 reads `ps5_autoloader/` payloads
-   from it; a PC can rewrite `frontend.zip` and drop new payloads.
-2. **WiFi**: the ESP32 brings up an open AP (`PS5 WKAL`). DHCP hands clients
-   the AP's IP as their DNS server; DNS :53 answers `manuals.playstation.net`
-   with the AP IP and NXDOMAINs everything else.
-3. **HTTPS :443 / HTTP :80** serve the frontend **from the same FAT
-   partition**, streaming entries (tinfl ring buffer) — the zip never lives
-   in the firmware image or in RAM.
+1. **USB MSC:** TinyUSB expone una partición FAT con nivelación de desgaste.
+   Contiene `frontend.zip` y el directorio `ps5_autoloader/`.
+2. **Wi-Fi:** la configuración heredada crea el AP abierto `PS5 WKAL`.
+   DHCP anuncia la dirección del AP como DNS; el servidor DNS resuelve
+   `manuals.playstation.net` hacia el dispositivo y rechaza dominios ajenos.
+   El AP WPA2 validado pertenece al diagnóstico, no a esta configuración.
+3. **HTTP :80 y HTTPS :443:** sirven el frontend desde FAT, descomprimiendo
+   cada entrada mediante un búfer circular de tinfl. El ZIP completo no se
+   carga en RAM ni se incorpora a la imagen de la aplicación.
 
-Both roles run simultaneously: PS5 powers the device over USB, mounts the
-drive, connects its WiFi to the AP, opens the User's Guide, and the exploit
-chain loads payloads straight off the drive. Update flow: unplug from PS5 →
-plug into a PC → replace `frontend.zip` → unplug → replug (power cycle
-reloads).
+El flujo previsto es alimentar el dispositivo por USB desde la consola,
+conectarse a su AP y cargar el frontend mediante la Guía del usuario. La
+validación de este flujo en la PS5 objetivo aún está pendiente.
 
-## Idle power and heat
+## Hardware y particiones
 
-CPU power management now uses **80 MHz when idle / 160 MHz while tasks are
-runnable**, following the USB-safe approach in
-[the remote-buddy power changes](https://github.com/kxn/vibe-remote-buddy-firmware/pull/1).
-APB stays at 80 MHz for USB OTG and PSRAM; automatic light sleep and deep
-sleep are not used. USB storage and the Wi-Fi hotspot remain available.
-See ESP-IDF's [power management documentation](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/api-reference/system/power_management.html).
+Cada perfil de [targets/boards.json](targets/boards.json) tiene su tabla de
+particiones, configuración y directorio de compilación:
 
-The five-second heartbeat and repeated flash crash-record reads are removed;
-boot/crash diagnostics run once, and per-request DNS/HTTP logs are debug-level.
-The main task exits after startup. DNS blocks waiting for packets and backs
-off on socket errors; TinyUSB already waits for USB events.
+| Perfil | Flash | PSRAM | Modo PSRAM | Partición storage (MiB aprox.) |
+|---|---|---|---|---|
+| `esp32s3-n4r2` | 4 MB | 2 MB | quad | 2,44 |
+| `esp32s3-n8r2` | 8 MB | 2 MB | quad | 5,81 |
+| `esp32s3-n8r8` | 8 MB | 8 MB | octal | 5,81 |
+| `esp32s3-n16r2` | 16 MB | 2 MB | quad | 13,81 |
+| `esp32s3-n16r8` | 16 MB | 8 MB | octal | 13,81 |
+| `esp32s3-n32r8` | 32 MB | 8 MB | octal | 29,81 |
 
-**An always-on Wi-Fi AP still draws radio power even without page requests.**
-ESP32-S3's [Wi-Fi Modem-sleep](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/api-guides/wifi.html#station-sleep)
-works in station-only mode, so enabling `WIFI_PS_MIN_MODEM` does not make
-this hotspot sleep. Fewer application tasks do not guarantee lower idle
-power than a BLE receiver. Further radio savings would require a different
-operating mode, such as explicitly turning off the hotspot after use.
+Los perfiles son configuraciones disponibles, no resultados de validación
+física de todas las placas. Para consultar la lista:
 
-`tools/build.py build/package/flash` also updates the power settings in an
-existing per-board `sdkconfig`, preserving other settings, and validates the
-resolved configuration. Direct `idf.py` builds need a fresh configuration
-or the equivalent manual settings. This is a **firmware update**: replacing
-`frontend.zip` alone cannot enable it. Flash the correct board target without
-`--erase-storage` to preserve USB files; a `*-full.bin` overwrites them.
-
-For a hardware comparison, use the same USB supply, enclosure, ambient
-temperature, and Wi-Fi client state. Wait for temperatures to settle and
-measure idle USB current before/after; then check PS5 reconnection, User's
-Guide HTTPS loading, payload reads, and PC USB writes. Build/host tests do
-not establish a measured temperature or current reduction.
-
-## Hardware targets
-
-All ESP32-S3 flash/PSRAM combinations are supported — pick the board with
-`--target` (or `make build TARGET=...`); each gets its own partition layout,
-sdkconfig and build directory:
-
-| target          | flash | PSRAM | PSRAM mode | storage partition |
-|-----------------|-------|-------|------------|-------------------|
-| `esp32s3-n4r2`  | 4 MB  | 2 MB  | quad       | 2.44 MB           |
-| `esp32s3-n8r2`  | 8 MB  | 2 MB  | quad       | 5.81 MB           |
-| `esp32s3-n8r8`  | 8 MB  | 8 MB  | octal      | 5.81 MB           |
-| `esp32s3-n16r2` | 16 MB | 2 MB  | quad       | 13.81 MB          |
-| `esp32s3-n16r8` | 16 MB | 8 MB  | octal      | 13.81 MB          |
-| `esp32s3-n32r8` | 32 MB | 8 MB  | octal      | 29.87 MB          |
-
-`python3 tools/build.py targets` prints the live list from
-`targets/boards.json`.
-
-## The USB drive: layout & payload autoload
-
-The exposed volume is a plain FAT drive — open it from a PC and you get:
-
+```sh
+python3 tools/build.py targets
 ```
-frontend.zip            the web frontend the AP serves (see below)
-ps5_autoloader/         payload drop-in dir read by the PS5 side
-  README.txt            short on-drive instructions
-  autoload.txt          (optional) load list, see format below
-  etaHEN.elf            payload ELFs you place here
+
+**La tabla N16R8 del repositorio difiere de la del diagnóstico probado:**
+storage empieza en `0x230000` en el proyecto base y en `0x310000` en el
+diagnóstico. La aplicación ocupa una partición de 2 MiB en la base y de 3 MiB
+en el diagnóstico. Utilizar siempre bootloader, tabla y aplicación del mismo
+juego de imágenes. Conservar bytes de flash al cambiar la tabla no garantiza
+conservar un volumen FAT utilizable.
+
+## Volumen USB y carga de payloads
+
+Distribución prevista en el volumen del firmware completo:
+
+```text
+frontend.zip            frontend web servido por el AP
+ps5_autoloader/         directorio de payloads leído desde la PS5
+  README.txt            instrucciones en español e inglés
+  autoload.txt          lista opcional de carga
+  etaHEN.elf            ejemplos de archivos aportados por el usuario
   kstuff.elf
-  ...
 ```
 
-After the exploit chain jailbreaks the console it loads the **unified
-autoloader** (bundled in the frontend as `payloads/payload.elf`). The
-autoloader waits for the ELF loader, then looks for an `autoload.txt`
-config, highest priority first:
+El frontend del proyecto base utiliza un autoloader unificado, empaquetado
+como `payloads/payload.elf`. Su búsqueda de `autoload.txt` sigue este orden:
 
-1. `ps5_autoloader_<app>/autoload.txt` on the USB drive — `<app>` is
-   `bdjb` for the Blu-ray-player jailbreak or the entry app's Title ID
-   (e.g. `PPSA01650` for YouTube)
-2. `ps5_autoloader_<app>/autoload.txt` in the PS5's internal `/data`
-3. `ps5_autoloader/autoload.txt` on the USB drive — **the usual case on
-   this device**
-4. `ps5_autoloader/autoload.txt` in internal `/data`
+1. `ps5_autoloader_<app>/autoload.txt` en USB: `<app>` es `bdjb` para la
+   aplicación de Blu-ray o el Title ID de la aplicación de entrada.
+2. El mismo directorio específico de aplicación en `/data` de la PS5.
+3. `ps5_autoloader/autoload.txt` en USB, la ubicación habitual del dispositivo.
+4. `ps5_autoloader/autoload.txt` en `/data` de la PS5.
 
-If a config is found, every payload listed in it is launched in order.
-If none is found, the autoloader starts its bundled **Payload Manager**
-so payloads can be picked on the console instead.
+Si encuentra la lista, ejecuta las entradas en orden; sin ella, utiliza el
+Payload Manager incluido. Estos comportamientos se conservan como referencia
+del proyecto base y no se han probado en la PS5 de TRAMOYA.
 
-### `autoload.txt` format
+### Formato de autoload.txt
 
-```
-# a line starting with '#' is a comment
-etaHEN.elf              # resolved relative to this file's directory
-!1500                   # sleep 1500 ms before the next line
+```text
+# Los comentarios empiezan por #; se omiten las líneas vacías.
+etaHEN.elf              # ruta relativa al directorio de esta lista
+!1500                  # espera 1500 ms antes de la siguiente entrada
 kstuff.elf
-@sync                   # optional, see below
 ```
 
-- one entry per line; blank lines and `#` comments are ignored
-- file names are relative to the directory containing `autoload.txt`;
-  absolute paths (starting with `/`) are used as-is
-- `!<ms>` sleeps before the next line — timing-sensitive payloads
-  (e.g. kstuff right after etaHEN) usually want a pause
-- `@sync` (best placed last): once every payload has loaded without a
-  single error, the whole active directory is copied to the PS5's
-  internal `/data`, verified byte-by-byte, and removed from the drive —
-  later boots then run from the console's own storage. Note that on this
-  device `@sync` writes to the emulated USB volume **from the PS5
-  side**, which is not part of the supported update flow; treat it as
-  experimental. The supported flow is: edit the drive from a PC with the
-  device unplugged from the console.
+Las rutas que comienzan por `/` son absolutas. La instrucción opcional `@sync`
+copia el directorio activo a `/data`, verifica los archivos y los retira del
+USB después de una carga sin errores. Es experimental: escribe en el volumen
+USB desde la PS5 y queda fuera del flujo de actualización soportado por la
+base. La actualización prevista se realiza desde un ordenador, con el
+dispositivo desconectado de la consola.
 
-Payload ELFs are not included — drop in the ones you use (etaHEN,
-kstuff, ...) from their own projects. To bake payloads into the storage
-image at flash time instead, use `make storage PAYLOAD_DIR=<dir>` (or
-`build.py --payload-dir <dir>`).
+Los ejemplos de payloads no implican compatibilidad con el firmware objetivo.
+Los ELF del usuario no se incluyen en este repositorio. `--payload-dir` o
+`PAYLOAD_DIR` permite incorporarlos al generar una imagen de almacenamiento.
 
-Update flow: unplug from the PS5 → plug into a PC → edit files →
-eject → replug into the PS5. The firmware caches the FAT/zip index until
-the next power cycle, so edits made while it is serving do not take
-effect until a replug.
+### Actualizar el contenido
 
-## The frontend is built from upstream — never committed
+Flujo del proyecto base: desconectar de PS5 → conectar al ordenador → sustituir
+`frontend.zip` o editar los archivos → expulsar el volumen → desconectar y
+volver a conectar. El firmware conserva el índice de FAT/ZIP en memoria hasta
+el siguiente arranque; los cambios requieren un ciclo de alimentación.
 
-This repository does **not** vendor `frontend.zip` or the upstream exploit
-frontend. At packaging time the build:
+La base mantiene FAT montada localmente mientras anuncia el medio por MSC.
+En TRAMOYA sigue pendiente validar la propiedad exclusiva del volumen durante
+las escrituras y la recarga del contenido servido. El diagnóstico probado
+sí desmonta FAT de la aplicación antes de ceder el volumen al ordenador.
 
-1. resolves the **latest release tag** of the upstream
-   `ps5-webkit-autoloader` project (GitHub API, with a git-tags fallback; pin
-   one with `--tag v0.5.2` or `UPSTREAM_TAG=`),
-2. clones that tag **with submodules** into `.deps/upstream/<tag>/` (cached
-   and reused while the tag still points at the same commit),
-3. runs upstream's own preparation scripts (`download_deps.sh`,
-   `apply_relapse_patch.sh`, `apply_slopkit_patch.sh`, `apply_umtx2_patch.sh`),
-4. packs `frontend/autoloader` + `pc-host/overrides` into `frontend.zip`
-   (DEFLATE, upstream path filters, generated icons, `[[…PLACEHOLDER]]`
-   version/build substitution and the unsupported-browser splash fix).
+## Preparación del frontend
 
-Every artifact records exactly where its frontend came from in a
-`frontend.zip-source.json` (tag, commit, SHA256) — also embedded into
-`firmware-manifest.json`.
+El repositorio no incluye `frontend.zip` ni las fuentes del frontend externo.
+Las herramientas heredadas resuelven una versión de `ps5-webkit-autoloader`,
+la adquieren con sus submódulos, ejecutan los scripts de preparación y parches,
+y empaquetan `frontend/autoloader` con `pc-host/overrides`.
 
-### Just want frontend.zip for the USB drive?
+Cada ZIP genera `frontend.zip-source.json` con procedencia, revisión y SHA-256;
+el manifiesto del firmware incorpora esa información. La selección por defecto
+es la última release disponible. Para una prueba reproducible hay que fijar
+la versión y comprobar su revisión y dependencias; un número de versión en un
+ejemplo no confirma compatibilidad con PS5 13.60.
 
-You do not need ESP-IDF for this — only Python 3, git and bash:
+Ejemplo de sintaxis con una etiqueta de referencia heredada:
 
 ```sh
-python3 tools/build_frontend_zip.py
-# → frontend.zip (+ frontend.zip-source.json), checked against the
-#   esp32s3-n4r2 storage budget by default; add --target esp32s3-n8r8
-#   for an 8 MB board, --payload installer.elf for the installer flow.
+python3 tools/build_frontend_zip.py --target esp32s3-n16r8 --tag v0.5.2
 ```
 
-Then: plug the ESP32-S3 into a PC, copy `frontend.zip` onto the exposed
-drive (replace the existing one), eject, unplug, replug into the PS5.
+Esta herramienta requiere Python 3, Git y Bash, sin ESP-IDF. Descarga y prepara
+fuentes externas. La preparación completa de TRAMOYA sigue pendiente según
+el [registro de estado](docs/estado-proyecto.md).
 
-## Build the firmware
+## Compilar y empaquetar
+
+Se utiliza **ESP-IDF 5.4.2**. Si ya está instalado, activar ese entorno; no es
+necesario volver a instalarlo. Ejemplo para la ubicación del SDK usada en macOS:
 
 ```sh
-# one-time: ESP-IDF v5.4.2 next to this repo
-git clone -b v5.4.2 --recursive --shallow-submodules \
-    https://github.com/espressif/esp-idf.git esp-idf
-cd esp-idf && ./install.sh esp32s3
-
-# build (activate the IDF environment first: . ./esp-idf/export.sh)
-python3 tools/build.py package --target esp32s3-n4r2
+. "$HOME/esp/esp-idf-v5.4.2/export.sh"
+python3 tools/build.py build --target esp32s3-n16r8
 ```
 
-or via the wrapper:
+Para generar un paquete con un ZIP previamente preparado y comprobado:
 
 ```sh
-make targets                 # list board targets
-make build  TARGET=esp32s3-n8r8
-make package TARGET=esp32s3-n8r8
-make zip     UPSTREAM_TAG=v0.5.2   # frontend.zip only, into main/
-make storage FRONTEND_ZIP=my.zip  # rebuild just the FAT image
+python3 tools/build.py package --target esp32s3-n16r8 --frontend frontend.zip
 ```
 
-`package` produces `build/<target>/ps5_wkal_host-full.bin`, a complete
-first-flash image (bootloader, partition table, app, storage) sized to the
-board's flash. Write it at **0x0**. It resets NVS and replaces storage
-contents — use it for the first flash; later updates are file copies on the
-USB drive, not reflashes (no OTA by design).
-
-Flashing needs an explicit port — nothing is auto-selected:
+Otras entradas del wrapper:
 
 ```sh
-make flash  TARGET=esp32s3-n4r2 PORT=/dev/ttyACM0
-make monitor TARGET=esp32s3-n4r2 PORT=/dev/ttyACM0
-make flash-all ... --erase-storage   # also rewrite storage (erases USB files)
+make targets
+make build TARGET=esp32s3-n16r8
+make package TARGET=esp32s3-n16r8 FRONTEND_ZIP=frontend.zip
+make zip TARGET=esp32s3-n16r8 UPSTREAM_TAG=v0.5.2
+make storage TARGET=esp32s3-n16r8 FRONTEND_ZIP=frontend.zip
 ```
 
-## CI (GitHub Actions)
+Sin `--frontend`, `package` prepara por defecto el frontend externo; se fija
+su etiqueta con `--upstream-tag`. La alternativa `--frontend-source diagnostic`
+crea la página inocua de este repositorio, distinta del firmware de diagnóstico
+ya validado. Las herramientas pueden adquirir dependencias durante la ejecución.
 
-`.github/workflows/build.yml`:
+`package` produce `build/<perfil>/ps5_wkal_host-full.bin`, con bootloader,
+tabla, aplicación y almacenamiento. La imagen completa se escribe en `0x0`,
+reinicia NVS y sustituye el contenido USB. No se debe usar como actualización
+que preserve archivos. No hay OTA: la aplicación tiene una sola partición.
 
-- **Run → Build firmware** (workflow_dispatch): builds all six targets (or a
-  comma-separated subset via `targets`), each packaging the frontend from the
-  latest upstream release (pin with `upstream_tag`). Artifacts:
-  `frontend` (zip + provenance) and `firmware-<target>` per board
-  (full-flash image, manifest, storage image).
-- **Push a `v*` tag**: same matrix plus a GitHub release containing
-  `ps5-wkal-<tag>-<board>-full.bin` for every board plus `frontend.zip`.
-- Every run also executes the host test suite (unit + ASan on the runner,
-  full FAT round-trip inside the ESP-IDF v5.4.2 container).
+### Grabación y recuperación
 
-## Tests
+El puerto debe identificarse antes de cada grabación. La siguiente sintaxis
+es una referencia del proyecto base, no un paso para regrabar ahora el diagnóstico:
 
 ```sh
-python3 tools/build.py test         # needs make + gcc (+ zlib)
+# Sustituir el valor por el puerto confirmado de la placa de prueba.
+TRAMOYA_PORT=/dev/cu.PUERTO_CONFIRMADO
+make flash TARGET=esp32s3-n16r8 PORT="$TRAMOYA_PORT"
+make monitor TARGET=esp32s3-n16r8 PORT="$TRAMOYA_PORT"
+```
+
+`flash` conserva los sectores de storage, pero eso solo conserva el volumen
+si se mantiene una distribución compatible. `make flash-all` o
+`python3 tools/build.py flash --erase-storage` escribe también storage y
+sustituye sus archivos; requiere el perfil y el puerto correspondientes.
+
+El acceso al cargador ROM se recupera manteniendo BOOT, pulsando y soltando
+RST, y soltando BOOT. Para arrancar la aplicación, pulsar RST con BOOT suelto.
+Cuando TinyUSB MSC usa el USB nativo del diagnóstico, la desaparición del
+puerto USB Serial/JTAG es esperable. Los logs del diagnóstico están configurados
+en UART0 a 115200 baudios; no se ha validado el posible puente UART de la placa.
+El juego de recuperación `hello_world` se conserva por separado, fuera de este
+repositorio. No mezclar sus imágenes con las del diagnóstico o las de la base.
+
+## Consumo y temperatura
+
+La base configura CPU a 80 MHz en reposo y 160 MHz cuando hay tareas ejecutables,
+con APB a 80 MHz para USB OTG y PSRAM. No utiliza suspensión automática ligera
+ni profunda. El diagnóstico validado utiliza CPU fija a 160 MHz: sus pruebas
+no validan el ahorro de energía del firmware completo.
+
+El proyecto base elimina el mensaje periódico de cinco segundos, lee los
+registros de fallo al arrancar y reduce los logs DNS/HTTP al nivel de depuración.
+Un AP Wi-Fi activo sigue consumiendo energía de radio. Reducir tareas no
+demuestra por sí solo una reducción de corriente o temperatura.
+
+`tools/build.py` sincroniza los ajustes de energía de configuraciones existentes
+en `build/package/flash` y comprueba el resultado. Una compilación directa con
+`idf.py` requiere una configuración equivalente. Sustituir `frontend.zip` no
+cambia esos ajustes del firmware. La comparación de consumo exige la misma
+alimentación, carcasa, temperatura ambiente y estado de conexión, con medidas
+tras estabilizar la temperatura; esas medidas están pendientes en TRAMOYA.
+
+## Pruebas y CI
+
+Pruebas de host disponibles en la base, con `make`, compilador C y zlib:
+
+```sh
+python3 tools/build.py test
 python3 tools/build.py test-asan
 ```
 
-The suite (`tools/tests/`) compiles the exact sources the firmware runs
-(`main/wk_*.c`, `main/http_server.c`, `main/miniz.c`) on the host:
+La suite de [tools/tests](tools/tests) cubre DNS y traducción de rutas frente
+a una referencia, índices ZIP, descompresión y CRC, manejadores HTTP simulados,
+configuración de energía y lectura de imágenes FAT. La prueba completa de FAT
+requiere ESP-IDF. Estos comandos pueden adquirir dependencias; no son los
+ensayos físicos del diagnóstico descritos en el registro de estado.
 
-- **DNS differential** — wire queries fed to both the firmware's
-  `wk_dns_handle_packet()` and the reference `pc-host/host.py` builders;
-  responses must match byte-for-byte.
-- **Path mapping differential** — `wk_zip_map_path()` vs the reference
-  `_relative_path()` over generated URI cases (queries, `/app/`,
-  `/document/.../ps5/`, `%2e%2e` folding, `..` chains).
-- **zip index** — hand-built STORE+DEFLATE archive plus garbage rejection.
-- **HTTP core** — `wk_http_serve_get()` through a memory sink: every entry of
-  a real archive inflates to its declared size with matching CRC32.
-- **payload.elf zlib cross-check** — tinfl loop vs independent zlib inflate.
-- **HTTP handler** — the real `wk_httpd_handle_get` via a mock
-  `esp_http_server`.
-- **FAT round-trip** (needs ESP-IDF) — `storagegen.py` image read back with
-  IDF's `fatfsparse`, byte-exact, then served through the firmware zip index.
+El workflow [build.yml](.github/workflows/build.yml) permite seleccionar perfiles
+y una etiqueta del frontend. Publica artefactos por perfil y ejecuta pruebas
+unitarias, sanitizadores e integración en ESP-IDF 5.4.2. El envío de una etiqueta
+`v*` activa además la publicación de una release. La existencia del workflow
+no demuestra que esta versión de TRAMOYA haya superado esas ejecuciones.
 
-Run it whenever `wk_*.c` or `http_server.c` changes.
+## Detalles de implementación heredados
 
-## Size budget (4 MB board, measured)
+- miniz utiliza nombres privados para evitar enlazar con la implementación
+  incompatible de tinfl en la ROM del ESP32-S3. La compilación verifica el enlace.
+- Los certificados se incorporan con `EMBED_TXTFILES`; se comprueban los bytes
+  y la correspondencia de certificado y clave en el ELF. Se generan en la
+  primera compilación si faltan. No equivale a aceptación del certificado en PS5.
+- La base incluye respuestas locales para pruebas de conectividad de la consola
+  y otros clientes. Su aceptación en PS5 13.60 sigue pendiente de prueba.
+- Los componentes `esp_tinyusb` y `tinyusb` se adquieren del registro de Espressif.
+- El presupuesto heredado de la placa de 4 MB es de unos 894 KiB de aplicación
+  en 1408 KiB y 2,4375 MiB de storage. Son cifras de la base, no de la N16R8
+  diagnosticada. El frontend cambia de tamaño según versión y contenido;
+  verificar el presupuesto antes de empaquetar.
 
-| item | size |
-|------|------|
-| app (TLS, DNS, MSC/CDC — no frontend) | ~894 KiB of 1408 KiB factory |
-| crash record partition | 128 KiB |
-| storage partition (FAT, wear-levelled) | 2.4375 MB |
-| frontend.zip from upstream release (DEFLATE) | ~1.95 MB |
-| free on the drive | ~0.5 MB |
+## Autoría y licencia
 
-The installer-ELF frontend variant (~2.9 MB) does not fit 4 MB flash — use an
-8 MB+ board for it. RAM: the zip index (~30 KB) and 48 KB/conn buffers; the
-archive streams from FAT through the tinfl ring buffer, never fully in RAM.
-
-## Notes / gotchas
-
-- The frontend (exploit chain, patches, icons) is GPL-3.0 upstream work;
-  this repository only packages and serves it. Payloads are fetched from the
-  upstream-pinned releases at build time — nothing exploit-related is
-  committed here.
-- Vendored miniz uses private names for ROM-provided symbols: the ESP32-S3
-  ROM ships an incompatible `tinfl_decompressor` layout, and resolving to ROM
-  corrupts the heap. `build.py` checks the linked implementation and the HTTP
-  object's references on every build.
-- Certificates are embedded as `EMBED_TXTFILES` (mbedTLS needs the trailing
-  NUL in the PEM length); `build.py` verifies cert/key bytes and public-key
-  match in the linked ELF. Regenerated automatically on first build.
-- `auto_mount_off=1` + a linker-wrapped `tud_msc_test_unit_ready_cb` keeps
-  the local FAT mount while MSC advertises the medium. Host and app read;
-  only the PC host writes.
-- If a PC rewrites the FAT while the app is serving, the app's cached FAT is
-  stale until the next power cycle — hence: unplug → edit → replug.
-- HTTPS **and** HTTP both run; the PS5 hits 443, browsers can test on 80.
-  Local reachability responses cover `/netstart/icst|ps4|ps5`,
-  `/connecttest.txt`, Microsoft connect-test hosts and the networktest
-  streams so the console's Wi-Fi check settles against the AP.
-- `CONFIG_SPIRAM_MODE_QUAD`/`OCT` per target matches the module; boards with
-  a different PSRAM than listed need their own entry in `targets/`.
-- No OTA: factory is single-slot by design (updates are file copies).
-- `esp_tinyusb`/`tinyusb` are managed components downloaded from the
-  Espressif registry on first build (network needed once).
-
-## License
-
-Firmware sources in `main/` and `tools/`: GPL-3.0-or-later, consistent with
-the upstream project this host packages (see `LICENSE`). miniz is public
-domain; the upstream frontend keeps its own GPL-3.0 licensing and is fetched
-unmodified from the pinned release tags.
+TRAMOYA parte del trabajo de [kxn](https://github.com/kxn/ps5-wkal-esp32s3)
+y del frontend de [itsPLK](https://github.com/itsPLK/ps5-webkit-autoloader).
+Se conservan el historial, los avisos y la [licencia GPL-3.0](LICENSE).
+La documentación heredada declara los fuentes de `main/` y `tools/` bajo
+GPL-3.0-or-later y miniz como dominio público. Los componentes externos
+conservan sus licencias y deben revisarse al preparar una distribución.
