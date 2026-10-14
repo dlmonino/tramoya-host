@@ -11,33 +11,53 @@ a later goal.
 This is a fork of [kxn/ps5-wkal-esp32s3](https://github.com/kxn/ps5-wkal-esp32s3),
 based on revision `70aed11faa1a657cd25cc5a52781c2b3764398f5`, retaining its
 history, authorship and licenses. Build artifacts still use the internal name
-`ps5_wkal_host`; this documentation update does not change the firmware.
+`ps5_wkal_host`.
 
-## Current status — 9 October 2026
+## Wi-Fi configuration over USB
 
-**Physical diagnostics have passed. Full-firmware integration and PS5 testing
-remain pending.** The separate `esp32s3-servidor-diagnostico` project was
-flashed and tested on one N16R8 board; the second board remains a reference
-running the previously tested `hello_world` firmware.
+The firmware reads `WIFI.TXT` at the USB volume root during startup. New
+storage images include these defaults:
 
-- Passed: startup, PSRAM, WPA2 Wi-Fi, DHCP, DNS, HTTP/HTTPS, Internet isolation,
-  and USB MSC reads, writes and persistence.
-- Stability: ten minutes, 61 samples, zero errors, no detected reboot and
-  stable internal memory after warm-up.
-- Pending: complete preparation of this repository's full firmware, integrate
-  the selected content, validate actual served-content updates through MSC
-  and repeat the checks against that final build before testing on PS5.
+```ini
+ssid=tramoya_host
+password=tramoya_host
+```
 
-The diagnostic firmware serves embedded pages. Its MSC test does not prove
-USB updates of the served frontend or compatibility with PS5 13.60.
-See [Status and validation](docs/project-status.en.md) for results and limits.
-This repository's `--frontend-source diagnostic` option generates a different
-test page; it does **not** reproduce the independently validated firmware.
+Authentication is WPA2-PSK. Edit the file, eject the volume and restart to apply
+changes. If the file is missing or invalid, Wi-Fi stays off and USB remains
+available for correction. See the [format and procedure](docs/wifi-configuration.en.md).
+The credential change, missing/invalid file and USB recovery scenarios passed on hardware on 14 October; see the status record.
 
-The following technical guide is retained from the base project. It describes
-the inherited architecture and tools, not completed TRAMOYA tests on PS5.
-In particular, the base AP below is open; the validated WPA2 AP belongs to
-the separate diagnostic firmware.
+## Current status — 14 October 2026
+
+**WIFI.TXT functional validation is complete for the tested scenarios.** The
+N16R8 firmware based on `7c197bc` was flashed with the inert diagnostic ZIP:
+WPA2, DHCP, local A resolution, external-name rejection, HTTP/HTTPS, interface
+isolation, credential changes and USB configuration recovery were exercised.
+The AAAA response defect is fixed in software under the [DNS contract](docs/dns.en.md);
+its DNS hardware test and HTTP/HTTPS/isolation controls passed on 14 October
+(75 checks). HTTP curl 56 remains
+unexplained; curl 63 came from the Mac being on the home Wi-Fi.
+
+The separate 9 October diagnostic and its ten-minute stability result remain
+historical evidence for that firmware only. Its board is kept as the reference.
+A controlled HTTP 56 run completed 61 requests without reproducing the error;
+its cause remains open. The new PSRAM frontend snapshot passed the inert USB
+update and WIFI.TXT integrity test on 14 October. The same candidate passed a
+physical 30-minute run of DNS, HTTP/HTTPS, MSC reads and isolation checks:
+181 complete samples, no failed checks and no reset observed over CDC. The
+historical HTTP curl 56 remains unexplained.
+David confirmed that the PS5 User's Guide displays the ESP32's inert page.
+The status photo shows `192.168.1.3/24` with gateway and DNS `192.168.1.1`;
+David confirmed `tramoya_host` over Wi-Fi and no LAN cable. Combined with the
+AP-only firmware and previous egress checks, this validates the tested network
+topology's isolation. Direct egress from the console, HTTPS transport and MSC
+on PS5 were not tested. A [minimal Relapse integration for 13.60](docs/relapse-integration.en.md)
+passed its hardware test: WebKit, kernel and elfldr startup were confirmed on
+the PS5. The USB update verified all 51 resources and preserved WIFI.TXT.
+Chain repeatability remains pending; the inert ZIP is retained. The later
+kstuff/ShadowMount+ profile has its own hardware result below.
+See [status and evidence](docs/project-status.en.md).
 
 ## Base project architecture
 
@@ -48,18 +68,19 @@ with a **USB drive** — one device, plugged straight into the PS5:
 1. **USB**: the ESP32 enumerates as a mass-storage drive (TinyUSB MSC over a
    wear-levelled FAT partition). The PS5 reads `ps5_autoloader/` payloads
    from it; a PC can rewrite `frontend.zip` and drop new payloads.
-2. **WiFi**: the ESP32 brings up an open AP (`PS5 WKAL`). DHCP hands clients
+2. **WiFi**: the ESP32 brings up the WPA2 AP defined in `WIFI.TXT`. DHCP hands clients
    the AP's IP as their DNS server; DNS :53 answers `manuals.playstation.net`
-   with the AP IP and NXDOMAINs everything else.
-3. **HTTPS :443 / HTTP :80** serve the frontend **from the same FAT
-   partition**, streaming entries (tinfl ring buffer) — the zip never lives
-   in the firmware image or in RAM.
+   with the AP IP for IN A/ANY; other local record types return NODATA,
+   and external names are rejected. See the [DNS contract](docs/dns.en.md).
+3. **HTTPS :443 / HTTP :80** serve an immutable copy of `frontend.zip` made
+   in PSRAM at startup. FAT is unmounted before MSC becomes available to the
+   computer. The ZIP is not embedded in the application image and must fit in
+   the largest free PSRAM block with a 512 KiB margin.
 
-Both roles run simultaneously: PS5 powers the device over USB, mounts the
-drive, connects its WiFi to the AP, opens the User's Guide, and the exploit
-chain loads payloads straight off the drive. Update flow: unplug from PS5 →
-plug into a PC → replace `frontend.zip` → unplug → replug (power cycle
-reloads).
+The intended PS5 workflow remains unvalidated. The software now releases FAT
+before exposing MSC; the inert ZIP update and integrity check passed on the
+board. The 30-minute stability run passed and the inert page appeared in the
+PS5 User's Guide; longer runs and the complete USB/PS5 workflow remain untested.
 
 ## Idle power and heat
 
@@ -129,6 +150,7 @@ The exposed volume is a plain FAT drive — open it from a PC and you get:
 
 ```
 frontend.zip            the web frontend the AP serves (see below)
+WIFI.TXT                SSID and WPA2 password read at startup
 ps5_autoloader/         payload drop-in dir read by the PS5 side
   README.txt            short on-drive instructions
   autoload.txt          (optional) load list, see format below
@@ -184,14 +206,13 @@ image at flash time instead, use `make storage PAYLOAD_DIR=<dir>` (or
 `build.py --payload-dir <dir>`).
 
 Update flow: unplug from the PS5 → plug into a PC → edit files →
-eject → replug into the PS5. The firmware caches the FAT/zip index until
-the next power cycle, so edits made while it is serving do not take
-effect until a replug.
-
-TRAMOYA still needs to validate exclusive storage ownership during writes and
-the subsequent reload of served content. The tested diagnostic firmware unmounts
-its local FAT before handing storage to the computer, but serves embedded pages;
-it does not exercise this base firmware's shared FAT/ZIP serving path.
+eject → restart. The new firmware serves a PSRAM snapshot until reboot. FAT is
+closed before the computer receives MSC. If the ZIP exceeds available PSRAM or
+cannot be indexed, USB remains available for correction and the web frontend is absent.
+The inert write/reload/integrity path passed on hardware; the older
+diagnostic firmware is separate evidence. The updater requires this candidate's
+HTTPS `/__tramoya_storage` witness before writing or restoring the ZIP; the
+older DNS firmware does not offer it.
 
 ## The frontend is built from upstream — never committed
 
@@ -238,14 +259,15 @@ the macOS SDK location from the TRAMOYA validation environment. Run project
 commands from the repository root:
 
 ```sh
+export PATH="$HOME/.espressif/python_env/idf5.4_py3.12_env/bin:$PATH"
 . "$HOME/esp/esp-idf-v5.4.2/export.sh"
 python3 tools/build.py build --target esp32s3-n16r8
 # Package a frontend ZIP that has already been prepared and checked:
 python3 tools/build.py package --target esp32s3-n16r8 --frontend frontend.zip
 ```
 
-Without `--frontend`, packaging prepares the external frontend by default;
-pin its version with `--upstream-tag`. `--frontend-source diagnostic` generates
+Without `--frontend`, packaging requires `--upstream-tag` to prepare the external frontend;
+omitting both fails before downloading or building. `--frontend-source diagnostic` generates
 this repository's benign placeholder page. Neither option reproduces the separate
 diagnostic firmware already tested. Build/test tools may download dependencies.
 
@@ -291,7 +313,7 @@ The separate `hello_world` recovery image set is kept outside this repository.
 
 - **Run → Build firmware** (workflow_dispatch): builds all six targets (or a
   comma-separated subset via `targets`), each packaging the frontend from the
-  latest upstream release (pin with `upstream_tag`). Artifacts:
+  explicitly pinned upstream release (`upstream_tag` or `TRAMOYA_UPSTREAM_TAG`). Artifacts:
   `frontend` (zip + provenance) and `firmware-<target>` per board
   (full-flash image, manifest, storage image).
 - **Push a `v*` tag**: same matrix plus a GitHub release containing
@@ -302,16 +324,16 @@ The separate `hello_world` recovery image set is kept outside this repository.
 ## Tests
 
 ```sh
-python3 tools/build.py test         # needs make + gcc (+ zlib)
-python3 tools/build.py test-asan
+python3 tools/build.py test --target esp32s3-n16r8  # quick host suite; FAT requires IDF
+python3 tools/build.py test-asan --target esp32s3-n16r8
 ```
 
 The suite (`tools/tests/`) compiles the exact sources the firmware runs
 (`main/wk_*.c`, `main/http_server.c`, `main/miniz.c`) on the host:
 
-- **DNS differential** — wire queries fed to both the firmware's
-  `wk_dns_handle_packet()` and the reference `pc-host/host.py` builders;
-  responses must match byte-for-byte.
+- **DNS contract** — corrected fixed wire vectors and independent matrices
+  for types, classes, flags, opcodes and boundaries. The inherited host.py
+  errors are deliberately not preserved; see [DNS](docs/dns.en.md).
 - **Path mapping differential** — `wk_zip_map_path()` vs the reference
   `_relative_path()` over generated URI cases (queries, `/app/`,
   `/document/.../ps5/`, `%2e%2e` folding, `..` chains).
@@ -340,7 +362,8 @@ These are base-project figures, not measurements of the N16R8 diagnostic build.
 
 The installer-ELF frontend variant (~2.9 MB) does not fit 4 MB flash — use an
 8 MB+ board for it. RAM: the zip index (~30 KB) and 48 KB/conn buffers; the
-archive streams from FAT through the tinfl ring buffer, never fully in RAM.
+new candidate copies the ZIP into PSRAM before exposing MSC; the archive must
+fit with a 512 KiB margin. Earlier firmware streamed it from FAT.
 
 ## Notes / gotchas
 
@@ -355,15 +378,14 @@ archive streams from FAT through the tinfl ring buffer, never fully in RAM.
 - Certificates are embedded as `EMBED_TXTFILES` (mbedTLS needs the trailing
   NUL in the PEM length); `build.py` verifies cert/key bytes and public-key
   match in the linked ELF. Regenerated automatically on first build.
-- `auto_mount_off=1` + a linker-wrapped `tud_msc_test_unit_ready_cb` keeps
-  the local FAT mount while MSC advertises the medium. Host and app read;
-  only the PC host writes.
-- If a PC rewrites the FAT while the app is serving, the app's cached FAT is
-  stale until the next power cycle — hence: unplug → edit → replug.
-- HTTPS **and** HTTP both run; the PS5 hits 443, browsers can test on 80.
-  Local reachability responses cover `/netstart/icst|ps4|ps5`,
-  `/connecttest.txt`, Microsoft connect-test hosts and the networktest
-  streams so the console's Wi-Fi check settles against the AP.
+- `auto_mount_off=1` prevents TinyUSB from remounting FAT in the application.
+  The candidate closes the application FAT mount before creating the USB LUN.
+  HTTP/HTTPS read only the PSRAM snapshot; edits appear after reboot.
+- HTTPS **and** HTTP both run; the intended PS5 guide flow uses 443, and
+  browsers can test on 80. Local reachability responses cover
+  `/netstart/icst|ps4|ps5`, `/connecttest.txt`, Microsoft connect-test hosts
+  and the networktest streams. The transport and Wi-Fi check behavior of this
+  PS5 have not been recorded.
 - `CONFIG_SPIRAM_MODE_QUAD`/`OCT` per target matches the module; boards with
   a different PSRAM than listed need their own entry in `targets/`.
 - No OTA: factory is single-slot by design (updates are file copies).
@@ -376,3 +398,36 @@ Firmware sources in `main/` and `tools/`: GPL-3.0-or-later, consistent with
 the upstream project this host packages (see `LICENSE`). miniz is public
 domain; the upstream frontend keeps its own GPL-3.0 licensing and is fetched
 unmodified from the pinned release tags.
+
+## Local checks and reproducible releases (2026-10-12)
+
+See the [development guide](DESARROLLO.md). For the validated N16R8 board on macOS:
+
+```sh
+export PATH="$HOME/.espressif/python_env/idf5.4_py3.12_env/bin:$PATH"
+source "$HOME/esp/esp-idf-v5.4.2/export.sh"
+python3 tools/build.py test --target esp32s3-n16r8 --require-fat
+python3 tools/build.py test-asan --target esp32s3-n16r8 --require-fat
+bash tools/install_git_hooks.sh
+```
+
+The Makefile selects Apple/GNU linker flags. Both full suites include FAT;
+`--require-fat` rejects missing IDF instead of silently skipping that test.
+The pinned local Gitleaks hook scans staged content. `checks.yml` runs host
+tests on macOS/Linux and IDF integration for PRs and pushes to main; remote
+results are available in GitHub Actions for each run. Full releases
+require an explicit `upstream_tag` or repository variable `TRAMOYA_UPSTREAM_TAG`.
+Local storage/package requires a verified `--frontend` or `--upstream-tag`,
+or the explicit offline diagnostic frontend. Record ZIP SHA-256 and firmware
+manifest; newly generated certificates prevent a blanket bit-reproducibility claim.
+
+Every build.py operation except targets/deps requires --target; make requires
+TARGET for those operations. No implicit board profile is selected.
+
+
+## Standalone payload profile — 15 October 2026
+
+The [kstuff + ShadowMount+ profile](docs/payloads.en.md) uses no etaHEN:
+56 files, 2,297,244 bytes, unchanged firmware. Software checks pass. David then
+confirmed payload loading and successful ShadowMount+ execution/operation on his
+PS5 13.60. Repeatability and stability remain pending; recovery is preserved.

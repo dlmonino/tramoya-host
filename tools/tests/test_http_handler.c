@@ -96,6 +96,16 @@ static void test_handler_serves_index(void)
     wk_zip_deinit(&g_test_zip);
 }
 
+static void test_storage_owner_witness_without_zip(void)
+{
+    run_request(NULL, "/__tramoya_storage");
+    CHECK_EQ_INT(g_mock_resp.status, 200);
+    CHECK(strstr(g_mock_wire_headers, "Cache-Control: no-store") != NULL);
+    CHECK_EQ_INT(g_mock_resp.body_len, sizeof("usb-snapshot-v1\n") - 1);
+    CHECK_MEM_EQ(g_mock_resp.body, "usb-snapshot-v1\n", sizeof("usb-snapshot-v1\n") - 1);
+}
+REGISTER_TEST("handler: USB ownership witness independent of ZIP", test_storage_owner_witness_without_zip);
+
 static void test_handler_404(void)
 {
     web_server_t srv;

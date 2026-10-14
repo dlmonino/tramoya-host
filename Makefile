@@ -1,7 +1,7 @@
 # Activate the ESP-IDF environment before invoking make.
-TARGET ?= esp32s3-n4r2
+TARGET ?=
 PYTHON ?= python3
-OPTIONS = --target $(TARGET) $(if $(FRONTEND_ZIP),--frontend "$(FRONTEND_ZIP)",) $(if $(PAYLOAD_DIR),--payload-dir "$(PAYLOAD_DIR)",)
+OPTIONS = $(if $(TARGET),--target $(TARGET),) $(if $(FRONTEND_ZIP),--frontend "$(FRONTEND_ZIP)",) $(if $(PAYLOAD_DIR),--payload-dir "$(PAYLOAD_DIR)",)
 .PHONY: all targets deps build storage package test test-asan menuconfig flash flash-all monitor zip
 all: build
 targets deps build storage package test test-asan menuconfig:

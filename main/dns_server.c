@@ -1,10 +1,5 @@
-/* dns_server.c - tiny captive-portal DNS server (thin socket layer over
- * the pure wk_dns response builder).
- *
- * Mirrors pc-host/host.py's DNSHandler:
- *   - A/ANY queries for the target domain -> this AP's IP,
- *   - known network probe domains -> this AP's IPv4 address,
- *   - everything else -> NXDOMAIN (telemetry/updates stay blocked).
+/* Servidor DNS UDP: transporte del contrato definido en wk_dns y docs/dns.md.
+ * Mantiene resolución local y rechazo de dominios externos, sin recursión.
  */
 #include <string.h>
 #include <stdio.h>
@@ -21,13 +16,18 @@ static const char *TAG = "dns";
 
 typedef struct {
     dns_server_t *server;
-    uint8_t query[WK_DNS_QUERY_MAX];
+    uint8_t query[WK_DNS_RECV_CAP];
     uint8_t response[WK_DNS_RESP_MAX];
     wk_dns_query_t observed;
 } dns_workspace_t;
 
+/* lwIP devuelve min(capacidad, longitud del datagrama): un byte adicional
+ * permite rechazar también mensajes mayores que el búfer de recepción. */
+_Static_assert(sizeof(((dns_workspace_t *)0)->query) > WK_DNS_QUERY_MAX,
+               "La recepcion UDP debe detectar datagramas mayores de 512 bytes");
+
 /* ------------------------------------------------------------------ */
-/* Packet handling (host-testable; no sockets involved)                */
+/* Tratamiento de paquetes comprobable en el Mac, sin sockets                */
 
 int dns_server_handle_packet(dns_server_t *dns, const uint8_t *query,
                              size_t qlen, uint8_t *resp, size_t resp_cap,
@@ -39,12 +39,12 @@ int dns_server_handle_packet(dns_server_t *dns, const uint8_t *query,
 }
 
 /* ------------------------------------------------------------------ */
-/* Socket task                                                         */
+/* Tarea de recepción UDP                                                         */
 
 static void dns_task(void *arg)
 {
-    /* Both packet buffers and diagnostics live on the heap. Logging through
-     * the CDC console uses additional stack beyond the DNS parser itself. */
+    /* Los paquetes y diagnósticos viven en el heap. La consola CDC
+     * necesita pila adicional a la que utiliza el analizador DNS. */
     dns_workspace_t *work = arg;
     dns_server_t *dns = work->server;
 
@@ -54,8 +54,8 @@ static void dns_task(void *arg)
         int n = recvfrom(dns->sock, work->query, sizeof(work->query), 0,
                          (struct sockaddr *)&from, &from_len);
         if (n < 0) {
-            /* A persistent socket error must not turn idle DNS into a
-             * runnable busy loop that holds the CPU at its maximum clock. */
+            /* Un error persistente de socket no debe provocar un bucle
+             * activo que mantenga la CPU a su frecuencia máxima. */
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
@@ -107,8 +107,8 @@ int dns_server_start(dns_server_t *dns, uint16_t port, uint32_t answer_ip,
         return -1;
     }
     work->server = dns;
-    /* ESP_LOGI's console/VFS path is part of the task's full call chain.
-     * 3072 bytes overflowed after adding query diagnostics on the S3. */
+    /* La ruta de consola/VFS de ESP_LOGI forma parte de la llamada.
+     * Los 3072 bytes anteriores desbordaban al registrar consultas en el S3. */
     if (xTaskCreate(dns_task, "dns", 8192, work, 5, NULL) != pdPASS) {
         free(work);
         close(dns->sock);

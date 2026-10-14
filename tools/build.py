@@ -24,8 +24,8 @@ def run(args, env):
 
 def resolve_frontend(args, build, env):
     """frontend.zip for the storage image: an explicit ZIP wins; otherwise
-    build it from the latest upstream release tag (default) or fall back to
-    the offline diagnostic page. Runs as a subprocess so partition_layout
+    build it from an explicitly pinned upstream tag or generate
+    the explicitly selected offline diagnostic page. Runs as a subprocess so partition_layout
     sees this target's WKAL_BOARD. Always leaves a frontend.zip-source.json
     provenance record next to the packaged ZIP."""
     provenance = build / "frontend.zip-source.json"
@@ -64,18 +64,26 @@ def validate_config(build, board, profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["targets", "deps", "build", "storage", "package", "test", "test-asan", "menuconfig", "monitor", "flash"])
-    parser.add_argument("--target", choices=sorted(BOARDS), default="esp32s3-n4r2")
+    parser.add_argument("--target", choices=sorted(BOARDS), help="Required board profile except for targets/deps")
     parser.add_argument("--frontend", type=Path, help="External ZIP; overrides --frontend-source")
     parser.add_argument("--frontend-source", choices=["release", "diagnostic"], default="release",
                         help="Packaged firmware serves the frontend built from the "
-                             "latest upstream release tag (network); 'diagnostic' "
+                             "pinned upstream release tag (network); 'diagnostic' "
                              "uses our offline placeholder page")
     parser.add_argument("--upstream-tag", default=None,
-                        help="Pin the upstream release tag instead of the latest release")
+                        help="Required upstream tag for release storage/package without --frontend")
     parser.add_argument("--payload-dir", type=Path, help="Optional external USB payload directory")
     parser.add_argument("--port", help="Explicit serial port; never auto-select a connected board")
     parser.add_argument("--erase-storage", action="store_true", help="With flash, write storage too (erases USB files)")
+    parser.add_argument("--require-fat", action="store_true",
+                        help="Fail before tests if ESP-IDF is not activated; never silently skip FAT")
     args = parser.parse_args()
+    if args.command not in ("targets", "deps") and not args.target:
+        parser.error("Select the board explicitly with --target (David's validated board: esp32s3-n16r8)")
+    if args.require_fat and (args.command not in ("test", "test-asan") or not os.environ.get("IDF_PATH")):
+        parser.error("--require-fat requires test/test-asan and an activated ESP-IDF shell")
+    if args.command in ("storage", "package") and not args.frontend and args.frontend_source == "release" and not args.upstream_tag:
+        parser.error("Reproducible packaging requires --frontend or --upstream-tag; use --frontend-source diagnostic for offline checks")
     if args.command == "targets":
         print(json.dumps(BOARDS, indent=2)); return
     fetch()

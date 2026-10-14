@@ -1,0 +1,10 @@
+title = "DLMonino: secretos y sesiones"
+[extend]
+useDefault = true
+
+[[rules]]
+id = "browser-session-cookie"
+description = "Valores de cookies en archivos de sesión de navegador"
+path = '''(?i)(^|/)(session\.json|storage[-_]state[^/]*\.json)$'''
+regex = '''(?i)"(?:value|access_token|refresh_token|token)"\s*:\s*"([^"\r\n]+)"'''
+secretGroup = 1

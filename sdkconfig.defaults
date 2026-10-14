@@ -1,12 +1,12 @@
-# sdkconfig.defaults - PS5 WKAL host, ESP32-S3 4M flash / 2M PSRAM
+# sdkconfig.defaults - Servidor ESP32-S3: valores comunes y perfil base N4R2
 CONFIG_IDF_TARGET="esp32s3"
 
-# --- CPU power management (USB stays online; no automatic light sleep) ---
+# --- Energía de CPU: USB activo, sin suspensión ligera automática ---
 CONFIG_PM_ENABLE=y
 CONFIG_PM_DFS_INIT_AUTO=n
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
 
-# --- Flash / partition layout ---
+# --- Flash y distribución de particiones ---
 CONFIG_PARTITION_TABLE_CUSTOM=y
 
 # --- PSRAM ---
@@ -16,7 +16,7 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
-# --- Heap / panic behaviour ---
+# --- Memoria dinámica y comportamiento ante fallos ---
 CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
@@ -25,12 +25,12 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_ESP_COREDUMP_STACK_SIZE=2048
 
-# --- WiFi ---
+# --- Wi-Fi ---
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 CONFIG_LWIP_DHCPS_ADD_DNS=y
 CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=n
 
-# --- USB MSC storage (TinyUSB exposes the fat partition as a drive) ---
+# --- USB MSC: TinyUSB expone la partición FAT como unidad ---
 CONFIG_TINYUSB_MSC_ENABLED=y
 CONFIG_TINYUSB_CDC_ENABLED=y
 CONFIG_TINYUSB_CDC_TX_BUFSIZE=4096
@@ -42,7 +42,7 @@ CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_API_ENCODING_UTF_8=y
 CONFIG_FATFS_FS_LOCK=2
 
-# --- HTTP server / TLS ---
+# --- Servidor HTTP y TLS ---
 CONFIG_ESP_HTTPS_SERVER_ENABLE=y
 CONFIG_MBEDTLS_SSL_PROTO_TLS1_2=y
 CONFIG_MBEDTLS_TLS_SERVER=y
@@ -54,13 +54,12 @@ CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=16384
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=16384
 
-# --- Logging / misc ---
+# --- Registro y otros ajustes ---
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_FREERTOS_HZ=100
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
 
-# --- WKAL app options ---
-CONFIG_WKAL_AP_SSID="PS5 WKAL"
+# --- Opciones de la aplicación ---
 CONFIG_WKAL_TARGET_DOMAIN="manuals.playstation.net"
 CONFIG_WKAL_SELECTED_EXPLOIT="relapse"

@@ -1,0 +1,6 @@
+# TRAMOYA: configuración inicial de la red Wi-Fi.
+# Guarda como texto UTF-8. SSID de 1-32 bytes.
+# WPA2: contraseña de 8-63 caracteres ASCII imprimibles.
+# Cambia los valores, expulsa el volumen USB y reinicia para aplicarlos.
+ssid=tramoya_host
+password=tramoya_host

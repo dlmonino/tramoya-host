@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""End-to-end FAT storage image test.
+"""Prueba completa de la imagen FAT con nivelación de desgaste.
 
-Builds a wear-levelled FAT image exactly like the firmware's 'fat' partition
-(IDF's own wl_fatfsgen.py), then reads it back with IDF's fatfsparse
-internals and verifies:
-  1. frontend.zip and ps5_autoloader/* survive the WL round-trip byte-exact,
-  2. the firmware's zip index + inflate path (wk_zip/wk_http, compiled into
-     a helper) serves payload.elf from the round-tripped archive with a
-     matching CRC.
+Genera la imagen mediante storagegen.py y la extrae con las herramientas IDF.
+Comprueba frontend.zip, WIFI.TXT y los payloads byte a byte; después sirve el
+ZIP extraído mediante el código C del firmware y verifica el CRC del payload.
 """
 import hashlib
 import os
@@ -25,7 +21,6 @@ FATFS = os.path.join(IDF, "components", "fatfs")
 sys.path.insert(0, FATFS)
 sys.path.insert(0, os.path.join(FATFS, "fatfs_utils"))
 
-import wl_fatfsgen  # noqa: E402
 import fatfsparse  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -45,34 +40,6 @@ def check(name, cond, detail=""):
         failures += 1
 
 
-def build_wl_image(stage_dir, out_img):
-    import argparse
-    args = argparse.Namespace()
-    args.input_directory = stage_dir
-    args.output_file = out_img
-    args.partition_size = PART_SIZE
-    args.sector_size = 512
-    args.sectors_per_cluster = 1
-    args.root_entry_count = 512
-    args.long_name_support = True
-    args.use_default_datetime = True
-    args.fat_type = None
-    args.fat_count = 2
-    args.wl_mode = "perf"
-    wl = wl_fatfsgen.WLFATFS(size=args.partition_size,
-                             sector_size=args.sector_size,
-                             fat_tables_cnt=args.fat_count,
-                             sectors_per_cluster=args.sectors_per_cluster,
-                             explicit_fat_type=args.fat_type,
-                             long_names_enabled=args.long_name_support,
-                             use_default_datetime=args.use_default_datetime,
-                             root_entry_count=args.root_entry_count,
-                             wl_mode=args.wl_mode)
-    wl.plain_fatfs.generate(args.input_directory)
-    wl.init_wl()
-    wl.wl_write_filesystem(args.output_file)
-
-
 def read_wl_image(img_path):
     fs = fatfsparse.read_filesystem(img_path)
     fs = fatfsparse.remove_wear_levelling_if_exists(fs)
@@ -83,7 +50,7 @@ def read_wl_image(img_path):
 
 
 def extract_all(boot, fat, fs, out_dir):
-    """Use fatfsparse's own tree walker to dump the image to out_dir."""
+    """Extraer la imagen en out_dir con el recorrido de directorios de fatfsparse."""
     fatfsparse.args = type("A", (), {"long_name_support": True})()
     start = boot.boot_sector_state.root_directory_start
     sectors = boot.boot_sector_state.root_dir_sectors_cnt
@@ -97,21 +64,23 @@ def main():
     stage = tempfile.mkdtemp(prefix="wkal_fat_stage_")
     out_img = os.path.join(tempfile.gettempdir(), "wkal_test_fat.img")
 
-    # Stage: frontend.zip + a ps5_autoloader payload dir.
+    # Preparar frontend.zip y el directorio ps5_autoloader de prueba.
     shutil.copy(ZIP, os.path.join(stage, "frontend.zip"))
     os.makedirs(os.path.join(stage, "ps5_autoloader"))
     with open(os.path.join(stage, "ps5_autoloader", "etaHEN.elf"), "wb") as f:
         f.write(b"\x7fELF" + os.urandom(4096))
     payload_src = open(os.path.join(stage, "ps5_autoloader", "etaHEN.elf"), "rb").read()
 
-    build_wl_image(stage, out_img)
+    # Usar el generador real de imágenes, incluida su plantilla WIFI.TXT.
+    subprocess.run([sys.executable, os.path.join(ROOT, "tools", "storagegen.py"),
+                    ZIP, os.path.join(stage, "ps5_autoloader"), "-o", out_img], check=True)
     img_size = os.path.getsize(out_img)
     check(f"WL image size == partition size ({PART_SIZE})",
           img_size == PART_SIZE, f"(got {img_size})")
 
     boot, fat, fs = read_wl_image(out_img)
-    # traverse_folder_tree CREATES the volume-label dir itself, so the path
-    # we hand it must not exist yet.
+    # traverse_folder_tree crea el directorio de la etiqueta del volumen;
+    # la ruta de destino no debe existir todavía.
     extracted = os.path.join(tempfile.gettempdir(),
                              "wkal_fat_extract_%d" % os.getpid())
     extract_all(boot, fat, fs, extracted)
@@ -130,7 +99,18 @@ def main():
 
     zip_rt_path = find_case_insensitive(extracted, "frontend.zip")
     elf_rt_path = find_case_insensitive(extracted, "ps5_autoloader/etaHEN.elf")
-    # Debug listing when missing
+    wifi_rt_path = find_case_insensitive(extracted, "WIFI.TXT")
+    wifi_template = os.path.join(ROOT, "tools", "usb_root", "WIFI.TXT")
+    with open(wifi_template, "rb") as f:
+        wifi_src = f.read()
+    wifi_rt = None
+    if wifi_rt_path is not None:
+        with open(wifi_rt_path, "rb") as f:
+            wifi_rt = f.read()
+    check("WIFI.TXT template round-trips byte-exact", wifi_rt == wifi_src)
+    check("default template contains the requested network credentials",
+          b"\nssid=tramoya_host\npassword=tramoya_host\n" in wifi_src)
+    # Mostrar los archivos extraídos si falta el ZIP.
     if zip_rt_path is None or not os.path.exists(zip_rt_path):
         for root, dirs, files in os.walk(extracted):
             for f in files:
@@ -144,7 +124,7 @@ def main():
           f"(rt={len(zip_rt) if zip_rt else None} src={len(zip_src)})")
     check("payload ELF round-trips byte-exact",
           elf_rt is not None and elf_rt == payload_src)
-    # Feed the round-tripped archive through the firmware's zip index + inflate.
+    # Pasar el ZIP recuperado por el índice y la descompresión del firmware.
     if zip_rt is not None:
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
             tf.write(zip_rt)

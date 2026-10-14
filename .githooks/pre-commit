@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Prevención local DLMonino: rutas privadas y escaneo del contenido staged."""
+import fnmatch
+import json
+import pathlib
+import shutil
+import subprocess
+import sys
+
+
+def git(*args):
+    return subprocess.check_output(['git', *args])
+
+
+def prohibited(name):
+    path = pathlib.PurePosixPath(name.lower())
+    parts = path.parts
+    leaf = path.name
+    if any(p in {'.venv', 'venv', 'venvs', '.claude', 'csv_output', 'logs'} for p in parts):
+        return True
+    if leaf not in {'.env.example', '.env.template'} and (
+            leaf == '.env' or fnmatch.fnmatchcase(leaf, '*.env') or leaf.startswith('.env.')):
+        return True
+    if leaf in {'session.json', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa'}:
+        return True
+    if fnmatch.fnmatchcase(leaf, 'storage_state*.json') or fnmatch.fnmatchcase(leaf, 'storage-state*.json'):
+        return True
+    if 'data' in parts and 'private' in parts:
+        return True
+    if 'odoo' in parts and ('data' in parts or leaf == 'odoo.conf'):
+        return True
+    if 'privilegios_agent' in parts and leaf == 'archivo.zip':
+        return True
+    return any(p.endswith(('_analisis', '_informe')) for p in parts[:-1])
+
+
+def main():
+    root = pathlib.Path(git('rev-parse', '--show-toplevel').decode().strip())
+    names = [n.decode('utf-8', errors='surrogateescape') for n in
+             git('diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR').split(b'\0') if n]
+    bad = [n for n in names if prohibited(n)]
+    if bad:
+        print('Commit bloqueado: archivos privados o regenerables:', file=sys.stderr)
+        for name in bad:
+            print('  ' + repr(name), file=sys.stderr)
+        return 1
+    if not names:
+        return 0
+    scanner = shutil.which('gitleaks')
+    if not scanner:
+        print('Commit bloqueado: instala Gitleaks según README antes de continuar.', file=sys.stderr)
+        return 1
+    expected = (root / '.gitleaks-version').read_text().strip()
+    version = subprocess.run([scanner, 'version'], capture_output=True, text=True)
+    if version.returncode or version.stdout.strip() != expected:
+        print('Commit bloqueado: versión Gitleaks requerida: ' + expected, file=sys.stderr)
+        return 1
+    result = subprocess.run([
+        scanner, 'git', '--pre-commit', '--staged', '--config', str(root / '.gitleaks.toml'),
+        '--redact=100', '--no-banner', '--no-color', '--log-level', 'error',
+        '--report-format', 'json', '--report-path', '-', str(root)
+    ], capture_output=True, text=True)
+    if result.returncode:
+        print('Commit bloqueado por el escáner de secretos; no se muestran valores.', file=sys.stderr)
+        try:
+            findings = json.loads(result.stdout)
+            for item in findings:
+                print('  {}:{} ({})'.format(repr(item.get('File', '')),
+                      item.get('StartLine', '?'), item.get('RuleID', '')), file=sys.stderr)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            print('  Revisa también la instalación/configuración del escáner.', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

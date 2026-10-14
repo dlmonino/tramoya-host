@@ -18,3 +18,17 @@ __pycache__/
 *.img
 *.pem
 /main/frontend.zip-source.json
+
+# Private local configuration and browser state
+.env
+.env.*
+!.env.example
+!.env.template
+session.json
+storage_state*.json
+storage-state*.json
+.venv/
+
+# Notas internas de desarrollo locales
+/AGENTS.md
+/CLAUDE.md

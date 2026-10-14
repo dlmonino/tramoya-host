@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TRAMOYA · Relapse 13.60</title>
+<style>
+body{background:#101827;color:#eef3fa;font:22px sans-serif;margin:8vh 10vw}
+main{max-width:960px}button{font:inherit;padding:20px 32px;margin:24px 0}
+button:focus{outline:5px solid #38bdf8}p{line-height:1.5}
+iframe{width:100%;height:65vh;border:1px solid #64748b;background:#060606}
+</style></head><body><main>
+<h1>TRAMOYA · Relapse 13.60</h1>
+<p id="estado" role="status">Comprobando la versión del navegador…</p>
+<p>Esta prueba inicia Relapse y su cargador ELF. La ejecución puede bloquear
+o reiniciar la consola. Los payloads opcionales quedan fuera de esta prueba.</p>
+<button id="iniciar" type="button" disabled>Iniciar Relapse</button>
+<p>La página espera tu pulsación. En la PS5, selecciona el botón y pulsa X.</p>
+<iframe id="relapse" src="about:blank" title="Registro de Relapse"></iframe>
+<script>
+// Descarta una ruta activa que el navegador haya restaurado tras un fallo.
+document.getElementById('relapse').src = 'about:blank';
+</script><script src="/inicio.js"></script>
+<noscript>El navegador necesita JavaScript para esta prueba.</noscript>
+</main></body></html>

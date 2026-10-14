@@ -1,0 +1,31 @@
+name: Project checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  host:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Host tests (FAT is checked in the IDF job)
+        run: |
+          python3 tools/build.py test --target esp32s3-n16r8
+          python3 tools/build.py test-asan --target esp32s3-n16r8
+  fat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.2
+          command: apt-get update -qq && apt-get install -y -qq zlib1g-dev && python tools/build.py test --target esp32s3-n16r8 --require-fat

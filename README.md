@@ -12,32 +12,61 @@ Este repositorio es un fork de
 [kxn/ps5-wkal-esp32s3](https://github.com/kxn/ps5-wkal-esp32s3), basado en la
 revisión `70aed11faa1a657cd25cc5a52781c2b3764398f5`. Conserva su historial,
 autorías y licencias. El nombre interno de los artefactos sigue siendo
-`ps5_wkal_host`; esta actualización de documentación no cambia el firmware.
+`ps5_wkal_host`.
 
-## Estado actual — 9 de octubre de 2026
+## Configuración Wi-Fi por USB
 
-**El diagnóstico físico está superado. La integración y las pruebas en PS5
-siguen pendientes.** Se ha grabado y ejecutado un proyecto de diagnóstico
-independiente, `esp32s3-servidor-diagnostico`, en una placa N16R8. La segunda
-placa se conserva como referencia con `hello_world`.
+El firmware lee `WIFI.TXT` en la raíz del volumen USB al arrancar. Las nuevas
+imágenes incluyen estos valores iniciales:
 
-- Superados: arranque, PSRAM, Wi-Fi WPA2, DHCP, DNS, HTTP/HTTPS, aislamiento
-  de Internet y lectura, escritura y persistencia por USB MSC.
-- Estabilidad: diez minutos, 61 muestras, cero errores y ningún reinicio
-  detectado; memoria interna estable tras el calentamiento.
-- Pendientes: completar la preparación del firmware de este repositorio,
-  integrar el contenido elegido, validar su actualización real mediante MSC
-  y repetir las pruebas sobre la compilación final antes de usar la PS5.
+```ini
+ssid=tramoya_host
+password=tramoya_host
+```
 
-El diagnóstico sirve páginas integradas en la aplicación. Su prueba MSC no
-demuestra todavía la actualización de las páginas servidas desde USB. Tampoco
-acredita compatibilidad funcional con PS5 13.60. Los resultados, límites y
-siguientes pasos están en [Estado y validación](docs/estado-proyecto.md).
+Se usa WPA2-PSK. Edita el fichero, expulsa el volumen y reinicia para aplicar
+los cambios. Si falta o contiene datos inválidos, el Wi-Fi queda apagado y el
+USB permite corregirlo. Consulta el [formato y procedimiento](docs/configuracion-wifi.md).
+Los escenarios de cambio de credenciales, archivo ausente/inválido y recuperación USB se validaron físicamente el 14 de octubre; véase el estado detallado.
 
-El resto de esta guía describe la arquitectura y las herramientas heredadas
-del proyecto base. Sus prestaciones no deben confundirse con las pruebas
-físicas del diagnóstico independiente. La opción `--frontend-source diagnostic`
-de este repositorio genera otra página de prueba; **no reproduce** ese proyecto.
+## Estado actual — 14 de octubre de 2026
+
+**Validación funcional de WIFI.TXT cerrada para los escenarios ensayados.**
+El firmware N16R8 basado en `7c197bc` se grabó con el ZIP de diagnóstico inocuo:
+se probaron WPA2, DHCP, resolución A local, rechazo de dominios externos,
+HTTP/HTTPS, aislamiento por la interfaz utilizada, cambios de credenciales y
+recuperación de configuración por USB.
+El defecto AAAA está corregido en software conforme al [contrato DNS](docs/dns.md);
+su ensayo físico DNS y controles HTTP/HTTPS/aislamiento pasaron el 14 de octubre
+(75 comprobaciones). El error HTTP curl 56
+continúa sin causa identificada; curl 63 se debió al Wi-Fi doméstico del Mac.
+
+El diagnóstico independiente del 9 de octubre y sus diez minutos de estabilidad
+son evidencia histórica exclusiva de aquel firmware. Su placa se conserva como
+referencia. La investigación controlada de HTTP 56 completó 61 peticiones sin reproducirlo;
+la causa sigue abierta. La candidata con copia del frontend en PSRAM superó
+la actualización USB con página inocua y conservación de WIFI.TXT el 14 de octubre.
+La misma candidata superó físicamente 30 minutos de DNS, HTTP/HTTPS, lecturas
+MSC y controles de aislamiento: 181 muestras completas, cero fallos y ningún
+reinicio observado por CDC. El error HTTP curl 56 histórico sigue sin explicación.
+David confirmó que la Guía del usuario de la PS5 muestra la web inocua del
+ESP32. La foto de estado muestra `192.168.1.3/24`, puerta de enlace y DNS
+`192.168.1.1`; David confirmó `tramoya_host` por Wi-Fi y ningún cable LAN.
+Junto con el modo AP sin enlace ascendente y las pruebas previas, esto valida
+el aislamiento de la topología ensayada. No se probó salida exterior directamente
+desde la consola, transporte HTTPS ni USB MSC en PS5. La [integración mínima de
+Relapse para 13.60](docs/integracion-relapse.md) superó su prueba física:
+WebKit, kernel y arranque de elfldr confirmados en la PS5. La actualización USB
+verificó los 51 recursos y conservó WIFI.TXT. La repetibilidad de la cadena
+sigue pendiente; se conserva el ZIP inocuo. El perfil posterior con kstuff y
+ShadowMount+ tiene su resultado físico registrado a continuación.
+Véase [Estado y evidencias](docs/estado-proyecto.md).
+
+El 15 de octubre se preparó el [perfil autónomo kstuff + ShadowMount+](docs/payloads.md),
+sin etaHEN: ZIP de 56 archivos y 2.297.244 bytes, firmware sin cambios.
+Sus pruebas de software pasan. David confirmó después la carga de los payloads
+y que ShadowMount+ se ejecutó y funcionó en la PS5 13.60. Repetibilidad y
+estabilidad de esta combinación siguen pendientes; recuperación conservada.
 
 ## Arquitectura del proyecto base
 
@@ -47,17 +76,19 @@ con un volumen USB en el ESP32-S3:
 
 1. **USB MSC:** TinyUSB expone una partición FAT con nivelación de desgaste.
    Contiene `frontend.zip` y el directorio `ps5_autoloader/`.
-2. **Wi-Fi:** la configuración heredada crea el AP abierto `PS5 WKAL`.
+2. **Wi-Fi:** TRAMOYA crea el AP WPA2 definido en `WIFI.TXT`.
    DHCP anuncia la dirección del AP como DNS; el servidor DNS resuelve
    `manuals.playstation.net` hacia el dispositivo y rechaza dominios ajenos.
-   El AP WPA2 validado pertenece al diagnóstico, no a esta configuración.
-3. **HTTP :80 y HTTPS :443:** sirven el frontend desde FAT, descomprimiendo
-   cada entrada mediante un búfer circular de tinfl. El ZIP completo no se
-   carga en RAM ni se incorpora a la imagen de la aplicación.
+   El contrato de tipos, clases y flags está en [DNS](docs/dns.md).
+3. **HTTP :80 y HTTPS :443:** la candidata nueva copia `frontend.zip` en PSRAM
+   al arrancar y sirve esa copia con tinfl. Cierra FAT antes de que MSC permita
+   acceso al ordenador. El ZIP no se incorpora a la imagen de la aplicación;
+   debe caber en PSRAM dejando 512 KiB de margen en el bloque libre mayor.
 
 El flujo previsto es alimentar el dispositivo por USB desde la consola,
-conectarse a su AP y cargar el frontend mediante la Guía del usuario. La
-validación de este flujo en la PS5 objetivo aún está pendiente.
+conectarse a su AP y cargar el frontend mediante la Guía del usuario. David
+confirmó que la PS5 mostró la página del ESP32; alimentar el dispositivo
+desde la consola y comprobar allí MSC siguen pendientes.
 
 ## Hardware y particiones
 
@@ -93,6 +124,7 @@ Distribución prevista en el volumen del firmware completo:
 
 ```text
 frontend.zip            frontend web servido por el AP
+WIFI.TXT                SSID y contraseña WPA2 leídos al arrancar
 ps5_autoloader/         directorio de payloads leído desde la PS5
   README.txt            instrucciones en español e inglés
   autoload.txt          lista opcional de carga
@@ -137,13 +169,15 @@ Los ELF del usuario no se incluyen en este repositorio. `--payload-dir` o
 
 Flujo del proyecto base: desconectar de PS5 → conectar al ordenador → sustituir
 `frontend.zip` o editar los archivos → expulsar el volumen → desconectar y
-volver a conectar. El firmware conserva el índice de FAT/ZIP en memoria hasta
-el siguiente arranque; los cambios requieren un ciclo de alimentación.
-
-La base mantiene FAT montada localmente mientras anuncia el medio por MSC.
-En TRAMOYA sigue pendiente validar la propiedad exclusiva del volumen durante
-las escrituras y la recarga del contenido servido. El diagnóstico probado
-sí desmonta FAT de la aplicación antes de ceder el volumen al ordenador.
+volver a conectar. La candidata nueva conserva una copia inmutable del ZIP en PSRAM hasta
+el siguiente arranque; los cambios requieren expulsar y reiniciar. FAT se
+desmonta de la aplicación antes de enumerar MSC. Si la copia no cabe en memoria
+o el ZIP no puede indexarse, USB permanece como vía de corrección y la web no sirve
+el frontend. La actualización con ZIP inocuo, recarga e integridad pasó en
+la placa; el ensayo de 30 minutos pasó, mientras que usos más largos, ZIP grandes
+y el flujo completo de USB y contenido en PS5 siguen pendientes.
+El comprobador exige el testigo HTTPS `/__tramoya_storage` de esta candidata
+antes de escribir o restaurar el ZIP; la versión DNS anterior no lo ofrece.
 
 ## Preparación del frontend
 
@@ -174,6 +208,7 @@ Se utiliza **ESP-IDF 5.4.2**. Si ya está instalado, activar ese entorno; no es
 necesario volver a instalarlo. Ejemplo para la ubicación del SDK usada en macOS:
 
 ```sh
+export PATH="$HOME/.espressif/python_env/idf5.4_py3.12_env/bin:$PATH"
 . "$HOME/esp/esp-idf-v5.4.2/export.sh"
 python3 tools/build.py build --target esp32s3-n16r8
 ```
@@ -194,8 +229,8 @@ make zip TARGET=esp32s3-n16r8 UPSTREAM_TAG=v0.5.2
 make storage TARGET=esp32s3-n16r8 FRONTEND_ZIP=frontend.zip
 ```
 
-Sin `--frontend`, `package` prepara por defecto el frontend externo; se fija
-su etiqueta con `--upstream-tag`. La alternativa `--frontend-source diagnostic`
+Sin `--frontend`, `package` exige fijar el frontend externo con `--upstream-tag`;
+si faltan ambas opciones falla antes de descargar o compilar. La alternativa `--frontend-source diagnostic`
 crea la página inocua de este repositorio, distinta del firmware de diagnóstico
 ya validado. Las herramientas pueden adquirir dependencias durante la ejecución.
 
@@ -253,8 +288,10 @@ tras estabilizar la temperatura; esas medidas están pendientes en TRAMOYA.
 Pruebas de host disponibles en la base, con `make`, compilador C y zlib:
 
 ```sh
-python3 tools/build.py test
-python3 tools/build.py test-asan
+export PATH="$HOME/.espressif/python_env/idf5.4_py3.12_env/bin:$PATH"
+source "$HOME/esp/esp-idf-v5.4.2/export.sh"
+python3 tools/build.py test --target esp32s3-n16r8 --require-fat
+python3 tools/build.py test-asan --target esp32s3-n16r8 --require-fat
 ```
 
 La suite de [tools/tests](tools/tests) cubre DNS y traducción de rutas frente
@@ -292,3 +329,28 @@ Se conservan el historial, los avisos y la [licencia GPL-3.0](LICENSE).
 La documentación heredada declara los fuentes de `main/` y `tools/` bajo
 GPL-3.0-or-later y miniz como dominio público. Los componentes externos
 conservan sus licencias y deben revisarse al preparar una distribución.
+
+## Trabajo local y controles
+
+Consulta la [guía de desarrollo](DESARROLLO.md). El Makefile selecciona el
+enlazador de macOS/Linux y conserva ASan/UBSan; `--require-fat` evita aceptar
+una ejecución sin FAT. Las pruebas escriben solo artefactos ignorados y temporales.
+Sin ESP-IDF puede ejecutarse la suite rápida omitiendo esa opción: no equivale
+a validación completa. No se necesita PS5 ni flashear una placa.
+
+Tras un clon, instala el hook local con `bash tools/install_git_hooks.sh`;
+requiere Gitleaks de `.gitleaks-version`. Escanea staged y bloquea rutas privadas.
+No equivale a revisión humana ni a permisos de acceso. No uses `--no-verify`.
+
+`checks.yml` añade pruebas rápidas macOS/Linux e integración FAT para PR y
+push a main. Consulta los resultados de cada ejecución en GitHub Actions.
+La publicación completa exige `upstream_tag` en lanzamiento manual o la variable
+de repositorio `TRAMOYA_UPSTREAM_TAG` para tags: elegir y verificar la versión
+requiere una decisión de release, nunca se selecciona latest silenciosamente.
+Para empaquetar localmente usa `--target esp32s3-n16r8` y un `--frontend`
+verificado, o `--upstream-tag` explícito. Registra el SHA-256 del ZIP y el
+manifiesto de firmware. Esto fija entradas; no garantiza binarios idénticos
+si se regeneran certificados o cambian otras entradas del toolchain.
+
+Los comandos de build.py (salvo targets/deps) exigen --target. El wrapper make
+exige TARGET para las mismas operaciones. No se elige una placa por defecto.

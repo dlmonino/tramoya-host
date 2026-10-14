@@ -116,6 +116,10 @@ __attribute__((weak)) esp_err_t wk_httpd_handle_get(httpd_req_t *req, web_server
 {
     const char *body;
     uint32_t length;
+    /* La web solo se inicia después del traspaso FAT/MSC. Este testigo no
+     * depende del ZIP y permite recuperar un archivo que no pueda indexarse. */
+    if (strcmp(req->uri, "/__tramoya_storage") == 0)
+        return send_probe(req, "usb-snapshot-v1\n", sizeof("usb-snapshot-v1\n") - 1, false);
     if (wk_connectivity_probe(req->uri, false, &body, &length))
         return send_probe(req, body, length, false);
     if (!srv || !srv->zip) {

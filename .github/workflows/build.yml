@@ -1,8 +1,8 @@
 # Build firmware for every supported ESP32-S3 memory configuration.
 #
 # The frontend is never committed: each run packages the frontend built from
-# the latest ps5-webkit-autoloader release tag (or the pinned upstream_tag
-# input), so a dispatch always produces the current upstream frontend.
+# an explicitly selected ps5-webkit-autoloader release tag (upstream_tag
+# input or TRAMOYA_UPSTREAM_TAG repository variable). Missing pins fail closed.
 #
 # - workflow_dispatch: pick targets / pin the upstream tag; artifacts only.
 # - push tag v*: full matrix + a GitHub release with per-board images.
@@ -15,7 +15,7 @@ on:
         required: false
         default: 'all'
       upstream_tag:
-        description: 'Upstream ps5-webkit-autoloader tag (empty = latest release)'
+        description: 'Reviewed upstream tag (empty uses TRAMOYA_UPSTREAM_TAG; missing both fails)'
         required: false
         default: ''
   push:
@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 env:
-  UPSTREAM_TAG: ${{ github.event.inputs.upstream_tag }}
+  UPSTREAM_TAG: ${{ github.event.inputs.upstream_tag || vars.TRAMOYA_UPSTREAM_TAG }}
 
 jobs:
   prepare:
@@ -59,10 +59,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential zlib1g-dev
       - name: Unit tests
         run: |
-          python3 tools/build.py test
+          python3 tools/build.py test --target esp32s3-n16r8
       - name: Unit tests (ASan/UBSan)
         run: |
-          python3 tools/build.py test-asan
+          python3 tools/build.py test-asan --target esp32s3-n16r8
 
   integration:
     # Full suite including the wear-levelled FAT image round-trip inside the
@@ -74,7 +74,7 @@ jobs:
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4.2
-          command: apt-get update -qq && apt-get install -y -qq zlib1g-dev; python tools/build.py test
+          command: apt-get update -qq && apt-get install -y -qq zlib1g-dev && python tools/build.py test --target esp32s3-n16r8 --require-fat
 
   frontend:
     # One frontend.zip per run, built from the resolved upstream release;
@@ -89,9 +89,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          FLAGS=""
-          if [ -n "${UPSTREAM_TAG}" ]; then FLAGS="--tag ${UPSTREAM_TAG}"; fi
-          python3 tools/build_frontend_zip.py --out frontend.zip ${FLAGS}
+          if [ -z "${UPSTREAM_TAG}" ]; then
+            echo 'Set upstream_tag or TRAMOYA_UPSTREAM_TAG to a reviewed upstream tag.' >&2
+            exit 1
+          fi
+          python3 tools/build_frontend_zip.py --out frontend.zip --tag "${UPSTREAM_TAG}"
       - uses: actions/upload-artifact@v4
         with:
           name: frontend

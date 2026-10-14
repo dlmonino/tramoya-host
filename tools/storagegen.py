@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""Build the wear-levelled FAT image for the `storage` partition.
+"""Generar la imagen FAT con nivelación de desgaste de la partición storage.
 
-Contents:
-    frontend.zip          the WebKit Autoloader frontend (served by the AP)
-    ps5_autoloader/       optional payloads the PS5 loads via unified-autoloader
+Contenido: frontend.zip, WIFI.TXT y el directorio opcional ps5_autoloader.
+Se usa el generador FAT de ESP-IDF para montar la misma imagen en la
+aplicación y exponerla por USB MSC.
 
-The image is generated with IDF's own fatfsgen WL tooling so the firmware
-can both mount it (VFS) and expose it over USB MSC. The same layout is what
-a user sees when plugging the device into a PC.
-
-Usage:
-    storagegen.py <frontend.zip> [payload_dir] -o <out.img>
+Uso: storagegen.py <frontend.zip> [directorio_payloads] -o <salida.img>
 """
 import argparse
 import os
@@ -31,7 +26,7 @@ sys.path.insert(0, os.path.join(FATFS, "fatfs_utils"))
 
 import wl_fatfsgen  # noqa: E402
 
-# Keep in sync with partitions_4m.csv (storage partition size).
+# Tamaño tomado de la partición storage del perfil de placa seleccionado.
 PART_SIZE = partition("storage")[1]
 
 
@@ -45,8 +40,10 @@ def main():
     stage = tempfile.mkdtemp(prefix="wkal_storage_")
     try:
         shutil.copy(args.zip_path, os.path.join(stage, "frontend.zip"))
-        # Payload drop-in dir for the PS5: the external payload dir replaces
-        # the bundled template (readme only) when one is given.
+        shutil.copy(Path(__file__).resolve().parent / "usb_root" / "WIFI.TXT",
+                    os.path.join(stage, "WIFI.TXT"))
+        # Si se indica un directorio externo de payloads, sustituye la plantilla
+        # incluida, que únicamente contiene instrucciones.
         payloads = Path(args.payload_dir) if args.payload_dir else             Path(__file__).resolve().parent / "ps5_autoloader"
         if payloads.is_dir():
             os.makedirs(os.path.join(stage, "ps5_autoloader"), exist_ok=True)
